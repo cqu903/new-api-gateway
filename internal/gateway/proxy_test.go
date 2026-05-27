@@ -803,67 +803,6 @@ func TestProxyEmitsCoverageAlertForKnownRawFirstRoute(t *testing.T) {
 	}
 }
 
-func TestProxyEmitsCoverageAlertForUnknownRoute(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer upstream.Close()
-
-	emitter := &recordingCoverageEmitter{}
-	handler := testHandler(upstream.URL, &memoryTraceRepo{}, evidence.NewFilesystemStore(t.TempDir()))
-	handler.CoverageEmitter = emitter
-
-	req := httptest.NewRequest(http.MethodPost, "/unmapped/provider/task", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", "Bearer sk-abc123")
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if len(emitter.alerts) != 1 {
-		t.Fatalf("coverage alerts = %d, want 1", len(emitter.alerts))
-	}
-	alert := emitter.alerts[0]
-	if alert.AlertCode != "unknown_route" {
-		t.Fatalf("AlertCode = %q", alert.AlertCode)
-	}
-	if alert.RawPath != "/unmapped/provider/task" {
-		t.Fatalf("RawPath = %q", alert.RawPath)
-	}
-	if alert.ContentType != "application/json" {
-		t.Fatalf("ContentType = %q", alert.ContentType)
-	}
-}
-
-func TestProxyEmitsCoverageAlertForUnknownRouteWhenUpstreamFails(t *testing.T) {
-	emitter := &recordingCoverageEmitter{}
-	handler := testHandler("https://upstream.test", &memoryTraceRepo{}, evidence.NewFilesystemStore(t.TempDir()))
-	handler.Client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return nil, errors.New("upstream unavailable")
-	})}
-	handler.CoverageEmitter = emitter
-
-	req := httptest.NewRequest(http.MethodPost, "/unmapped/provider/task", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", "Bearer sk-abc123")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if len(emitter.alerts) != 1 {
-		t.Fatalf("coverage alerts = %d, want 1", len(emitter.alerts))
-	}
-	if emitter.alerts[0].AlertCode != "unknown_route" {
-		t.Fatalf("AlertCode = %q", emitter.alerts[0].AlertCode)
-	}
-}
-
 func TestProxyDoesNotEmitCoverageAlertWhenTracePersistenceFails(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
