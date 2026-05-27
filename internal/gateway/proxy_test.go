@@ -1928,6 +1928,54 @@ func TestProxyStreamingAuditPersistenceSurvivesCanceledRequestContext(t *testing
 	}
 }
 
+func TestProxyRejectsUnmatchedRouteWith404(t *testing.T) {
+	handler := testHandler("https://upstream.test", &memoryTraceRepo{}, evidence.NewFilesystemStore(t.TempDir()))
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/panel"},
+		{"GET", "/api/home_page_content"},
+		{"POST", "/api/user/login"},
+		{"GET", "/favicon.ico"},
+		{"GET", "/static/app.js"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer sk-abc123")
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404", rec.Code)
+			}
+			if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+				t.Fatalf("Content-Type = %q, want application/json", ct)
+			}
+			var body map[string]interface{}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			errObj, ok := body["error"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("response has no error object: %v", body)
+			}
+			if code, _ := errObj["code"].(float64); code != 404 {
+				t.Fatalf("error.code = %v, want 404", code)
+			}
+			if errType, _ := errObj["type"].(string); errType != "not_found" {
+				t.Fatalf("error.type = %q, want not_found", errType)
+			}
+			msg, _ := errObj["message"].(string)
+			if !strings.Contains(msg, tc.method) || !strings.Contains(msg, tc.path) {
+				t.Fatalf("error.message = %q, want it to contain method and path", msg)
+			}
+		})
+	}
+}
+
 func testHandler(upstreamURL string, repo traces.Repository, store evidence.Store) Handler {
 	return Handler{
 		UpstreamBaseURL:  upstreamURL,
