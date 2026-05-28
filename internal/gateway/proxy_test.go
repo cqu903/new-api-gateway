@@ -1868,21 +1868,36 @@ func TestProxyStreamingAuditPersistenceSurvivesCanceledRequestContext(t *testing
 }
 
 func TestProxyRejectsUnmatchedRouteWith404(t *testing.T) {
-	handler := testHandler("https://upstream.test", &memoryTraceRepo{}, evidence.NewFilesystemStore(t.TempDir()))
+	repo := &memoryTraceRepo{}
+	emitter := &recordingCoverageEmitter{}
+	publisher := &recordingJobPublisher{}
+	handler := testHandler("https://upstream.test", repo, evidence.NewFilesystemStore(t.TempDir()))
+	handler.CoverageEmitter = emitter
+	handler.JobPublisher = publisher
 
 	for _, tc := range []struct {
 		method string
 		path   string
+		auth   bool
 	}{
-		{"GET", "/panel"},
-		{"GET", "/api/home_page_content"},
-		{"POST", "/api/user/login"},
-		{"GET", "/favicon.ico"},
-		{"GET", "/static/app.js"},
+		{"GET", "/panel", true},
+		{"GET", "/api/home_page_content", true},
+		{"POST", "/api/user/login", true},
+		{"GET", "/favicon.ico", true},
+		{"GET", "/static/app.js", true},
+		{"GET", "/panel", false},
+		{"OPTIONS", "/v1/chat/completions", true},
+		{"GET", "/unknown?foo=bar", true},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			repo.traces = nil
+			emitter.alerts = nil
+			publisher.jobs = nil
+
 			req := httptest.NewRequest(tc.method, tc.path, nil)
-			req.Header.Set("Authorization", "Bearer sk-abc123")
+			if tc.auth {
+				req.Header.Set("Authorization", "Bearer sk-abc123")
+			}
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -1908,8 +1923,17 @@ func TestProxyRejectsUnmatchedRouteWith404(t *testing.T) {
 				t.Fatalf("error.type = %q, want not_found", errType)
 			}
 			msg, _ := errObj["message"].(string)
-			if !strings.Contains(msg, tc.method) || !strings.Contains(msg, tc.path) {
+			if !strings.Contains(msg, tc.method) || !strings.Contains(msg, req.URL.Path) {
 				t.Fatalf("error.message = %q, want it to contain method and path", msg)
+			}
+			if len(repo.traces) != 0 {
+				t.Fatalf("expected 0 traces, got %d", len(repo.traces))
+			}
+			if len(emitter.alerts) != 0 {
+				t.Fatalf("expected 0 coverage alerts, got %d", len(emitter.alerts))
+			}
+			if len(publisher.jobs) != 0 {
+				t.Fatalf("expected 0 published jobs, got %d", len(publisher.jobs))
 			}
 		})
 	}

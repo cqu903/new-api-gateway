@@ -62,13 +62,15 @@ const (
 func writeRouteNotFound(w http.ResponseWriter, method, path string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]interface{}{
 			"message": fmt.Sprintf("unknown route: %s %s", method, path),
 			"type":    "not_found",
 			"code":    404,
 		},
-	})
+	}); err != nil {
+		log.Printf("writeRouteNotFound: encode error for %s %s: %v", method, path, err)
+	}
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -77,6 +79,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	entry, ok := h.Registry.Match(req.Method, req.URL.Path)
 	if !ok {
+		log.Printf("route not found: %s %s remote=%s", req.Method, req.URL.Path, req.RemoteAddr)
 		writeRouteNotFound(w, req.Method, req.URL.Path)
 		return
 	}
@@ -888,8 +891,6 @@ func routeSupportLevel(record traceRecord) string {
 		return "deep_normalized"
 	case routes.CaptureRawAndMinimal:
 		return "raw_minimal"
-	case routes.CaptureRawOnly:
-		return "raw_only"
 	default:
 		return "unsupported"
 	}
