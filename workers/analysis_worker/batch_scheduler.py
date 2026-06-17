@@ -102,10 +102,15 @@ def run_full_batch_with_daily_reconcile(
     sleep_fn=time.sleep,
     log_fn=_default_log,
     max_runs: int | None = None,
+    wake_offset_seconds: int = 90,
 ) -> None:
     """Hourly batch (baselines + IsolationForest). Once every 24h (or on first
     run when last_full_rebuild_at IS NULL), also runs full usage_aggregates
-    reconciliation before baselines/IF."""
+    reconciliation before baselines/IF.
+
+    ``wake_offset_seconds`` 偏移 hourly wake, 避开 analysis-rollup 的整点唤醒
+    (rollup 在 :00/:03/:06/... 唤醒, 全表 DELETE 跟 rollup 窗口 ROLLUP 在
+    READ COMMITTED 下短暂重叠). 默认 90 秒让 batch 落到 :01:30."""
     if not dsn:
         raise SystemExit("POSTGRES_DSN is required for analysis batch scheduler")
     if connect is None:
@@ -114,7 +119,7 @@ def run_full_batch_with_daily_reconcile(
 
     runs = 0
     while True:
-        sleep_seconds = _sleep_until_next_interval(now_fn(), 3600)
+        sleep_seconds = _sleep_until_next_interval(now_fn(), 3600) + wake_offset_seconds
         log_fn(f"batch sleeping {sleep_seconds:.0f}s until next hourly run")
         sleep_fn(sleep_seconds)
 

@@ -195,3 +195,33 @@ def test_run_full_batch_with_daily_reconcile_does_not_write_timestamp_on_failure
         )
 
     assert write_mock.call_count == 0
+
+
+def test_run_full_batch_with_daily_reconcile_applies_wake_offset():
+    """wake_offset_seconds 加到 sleep 时间上, 避开 analysis-rollup 的整点唤醒."""
+    sleep_calls = []
+    now = datetime(2026, 6, 9, 10, 15, 30, tzinfo=timezone.utc)
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    with patch("batch_scheduler.run_offline_batch"), \
+         patch("batch_scheduler._read_last_full_rebuild_at", return_value=None), \
+         patch("batch_scheduler._write_last_full_rebuild_at"):
+        run_full_batch_with_daily_reconcile(
+            "postgres://example",
+            connect=lambda dsn: FakeConnection(),
+            now_fn=lambda: now,
+            sleep_fn=sleep_calls.append,
+            log_fn=lambda m: None,
+            max_runs=1,
+            wake_offset_seconds=90,
+        )
+
+    # _sleep_until_next_interval(10:15:30, 3600) = 2670.0 (to 11:00:00)
+    # + 90 offset = 2760.0 (to 11:01:30, avoiding rollup wake at :00/:03/...)
+    assert sleep_calls == [2760.0]
