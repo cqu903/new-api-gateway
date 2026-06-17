@@ -64,7 +64,8 @@ def run_batch_scheduler(
 
 
 def _read_last_full_rebuild_at(conn) -> datetime | None:
-    """Read last_full_rebuild_at from batch_runtime_state. Returns None if missing or NULL."""
+    """Read last_full_rebuild_at from batch_runtime_state. Returns None if missing,
+    NULL, or stored without timezone info (forces safe re-rebuild)."""
     cursor = conn.cursor()
     cursor.execute(
         "SELECT state_value->>'last_full_rebuild_at' FROM batch_runtime_state WHERE state_key = %s",
@@ -73,7 +74,10 @@ def _read_last_full_rebuild_at(conn) -> datetime | None:
     row = cursor.fetchone()
     if not row or not row[0]:
         return None
-    return datetime.fromisoformat(row[0])
+    parsed = datetime.fromisoformat(row[0])
+    if parsed.tzinfo is None:
+        return None
+    return parsed
 
 
 def _write_last_full_rebuild_at(conn, when: datetime) -> None:
@@ -114,20 +118,20 @@ def run_full_batch_with_daily_reconcile(
         log_fn(f"batch sleeping {sleep_seconds:.0f}s until next hourly run")
         sleep_fn(sleep_seconds)
 
-        started_at = now_fn().isoformat()
+        batch_started_at = now_fn()
+        started_at_iso = batch_started_at.isoformat()
         try:
             with connect(dsn) as conn:
                 last = _read_last_full_rebuild_at(conn)
-                now = now_fn()
-                full = (last is None) or ((now - last).total_seconds() >= FULL_RECONCILE_INTERVAL_SECONDS)
+                full = (last is None) or ((batch_started_at - last).total_seconds() >= FULL_RECONCILE_INTERVAL_SECONDS)
                 if full:
                     log_fn("running full usage_aggregates reconciliation before baselines/IF")
                 result = run_offline_batch(conn, full_rebuild_aggregates=full)
                 if full:
-                    _write_last_full_rebuild_at(conn, now_fn())
-            log_fn(f"batch complete at {started_at}: {result}")
+                    _write_last_full_rebuild_at(conn, batch_started_at)
+            log_fn(f"batch complete at {started_at_iso}: {result}")
         except Exception as exc:  # pragma: no cover - defensive runtime logging
-            log_fn(f"batch failed at {started_at}: {exc!r}")
+            log_fn(f"batch failed at {started_at_iso}: {exc!r}")
 
         runs += 1
         if max_runs is not None and runs >= max_runs:

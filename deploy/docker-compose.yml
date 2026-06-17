@@ -143,6 +143,8 @@ services:
     volumes:
       - ..:/workspace
     command: ["sh", "-c", "uv sync --quiet && exec uv run python batch_scheduler.py"]
+    restart: unless-stopped
+
   analysis-rollup:
     image: ghcr.io/astral-sh/uv:python3.11-bookworm
     depends_on:
@@ -162,6 +164,7 @@ services:
     volumes:
       - ..:/workspace
     command: ["sh", "-c", "uv sync --quiet && exec uv run python batch_scheduler.py"]
+    restart: unless-stopped
 
   # ── On-demand services ─────────────────────────────
   migrate:

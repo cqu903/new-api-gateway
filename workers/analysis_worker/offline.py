@@ -154,7 +154,7 @@ def rebuild_usage_aggregates_recent(connection, window_hours: int = 3) -> int:
     for bucket in ("hour", "day"):
         cursor.execute(
             ROLLUP_USAGE_FACTS_WINDOWED,
-            (bucket, bucket, window_hours),
+            (bucket, bucket, str(window_hours)),
         )
         rowcount = getattr(cursor, "rowcount", 0)
         if isinstance(rowcount, int) and rowcount > 0:
