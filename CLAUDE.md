@@ -52,14 +52,14 @@ docker compose -f deploy/docker-compose.yml --profile e2e --env-file .env.local 
 ## Env And Runtime
 
 - 本地快速启动可用 `bash start.sh`：它会在缺少 `.env.local` 时从 `.env.example` 复制并退出，自动拉起 postgres/redis，必要时执行迁移，再并行启动 Go 网关和 Python worker。
-- Docker Compose 默认会同时启动 `analysis-worker`、`analysis-enrichment-worker`、`analysis-batch`；不要误以为只有一个 worker。
+- Docker Compose 默认会同时启动 `analysis-worker`、`analysis-enrichment-worker`、`analysis-batch`、`analysis-rollup`；不要误以为只有一个 worker。`analysis-rollup` 每 3 分钟按 3 小时窗口增量重建 `usage_aggregates`；`analysis-batch` 每小时跑 baselines + IsolationForest，每 24 小时跑一次全量对账。
 - worker 使用 Python 3.11+ 和 `uv`；Compose 容器启动命令里会先 `uv sync --quiet`。
 - 启用 OSS 证据存储时，Go 网关和 Python worker 都要能读到同一套 `OSS_*` 环境变量。
 - LLM judge 是可选外部能力；如果设置了任意 `LLM_JUDGE_*`，至少要同时设置 `LLM_JUDGE_BASE_URL` 和 `LLM_JUDGE_MODEL`，否则 worker 启动直接退出。
 
 ## Testing Gotchas
 
-- E2E 是 docker-native `profile=e2e` on-demand 容器：复用已部署的网关 + 常驻 worker（`analysis-worker` / `analysis-enrichment-worker` / `analysis-batch`），不再 `go run` 网关、不发布宿主机端口、不再手动投 list/跑 `--redis-once`。
+- E2E 是 docker-native `profile=e2e` on-demand 容器：复用已部署的网关 + 常驻 worker（`analysis-worker` / `analysis-enrichment-worker` / `analysis-batch` / `analysis-rollup`），不再 `go run` 网关、不发布宿主机端口、不再手动投 list/跑 `--redis-once`。
 - worker 单元逻辑已回归 `workers/analysis_worker/tests/`（pytest）；e2e 只保留 5 个端到端用例，网关→worker 全链路依赖常驻 worker 消费 `analysis.core` stream。
 
 ## Data And Safety

@@ -181,7 +181,7 @@ RBAC 角色：`viewer` → `auditor` → `raw_access` → `admin`，权限逐级
 | 维度 | Go 网关 (audit-gateway) | Python 分析 Worker (analysis_worker) |
 |------|------------------------|--------------------------------------|
 | 进程类型 | HTTP 长驻服务 | Redis 消费者长驻进程 |
-| 数据方向 | 写入 `traces`、`raw_evidence_objects`、`token_identity_cache`、`coverage_alerts` | 写入 `messages`（canonical 消息）、`trace_messages`（位置关联）、`analysis_results`、`usage_aggregates`、`usage_anomalies`、`worker_heartbeats`、`raw_evidence_objects`（媒体资产）、更新 `traces.request_body_sha256`。`normalized_messages` 在 migration 0018 后是 `messages ⋈ trace_messages` 的兼容视图，仅用于 admin 读路径 |
+| 数据方向 | 写入 `traces`、`raw_evidence_objects`、`token_identity_cache`、`coverage_alerts` | 写入 `messages`（canonical 消息）、`trace_messages`（位置关联）、`analysis_results`、`usage_anomalies`、`trace_usage_facts`、`worker_heartbeats`、`raw_evidence_objects`（媒体资产）、更新 `traces.request_body_sha256`。`normalized_messages` 在 migration 0018 后是 `messages ⋈ trace_messages` 的兼容视图，仅用于 admin 读路径 |
 | 核心能力 | 反向代理、请求/响应采集、身份解析、管理 API + UI | 协议归一化、用量聚合、异常检测、工作相关性分类 |
 | 通信方式 | XADD `analysis.core` | XREADGROUP / XAUTOCLAIM / XACK 消费 Redis Streams |
 | 不启动的影响 | 整个系统不可用 | 代理转发正常，但分析、聚合、告警全部不可用，Redis 队列堆积 |
@@ -250,7 +250,7 @@ stateDiagram-v2
 
 默认启动即进入持续消费模式，收到 SIGTERM/SIGINT 时优雅退出。默认消费 `analysis.core`，如需单独跑慢增强阶段可通过 `--redis-list analysis.enrichment` 或环境变量 `ANALYSIS_REDIS_LIST=analysis.enrichment` 启动第二组 consumer。core worker 暴露 4 个吞吐/恢复配置：`ANALYSIS_CORE_READ_COUNT`、`ANALYSIS_CORE_MAX_INFLIGHT`、`ANALYSIS_CORE_LEASE_SECONDS`、`ANALYSIS_CORE_RETRY_LIMIT`。enrichment worker 也有独立调参项：`ANALYSIS_ENRICHMENT_READ_COUNT`、`ANALYSIS_ENRICHMENT_MAX_INFLIGHT`、`ANALYSIS_ENRICHMENT_LEASE_SECONDS`、`ANALYSIS_ENRICHMENT_RETRY_LIMIT`、`ANALYSIS_ENRICHMENT_LLM_MAX_CONCURRENCY`，其中 `LLM_MAX_CONCURRENCY` 会作为 enrichment 批量消费并发上限。`--redis-once` 仅处理一个任务后退出，供本地开发/调试使用。E2E 现已 docker-native 化为 `profile=e2e` on-demand 容器（复用已部署网关 + 常驻 worker，不再手动投 list/跑 `--redis-once`）。
 
-`usage_aggregates` 与 `baseline_cache` 不再由 core 热路径同步 upsert；worker 只写单 trace 的 `trace_usage_facts`，离线 batch 负责 rollup 聚合和 baseline 重建。管理后台新增 `分析运行` 视图，通过 Redis Streams + `analysis_runtime_samples` / `analysis_tasks` 查询实时队列与消费者状态。
+`usage_aggregates` 与 `baseline_cache` 不再由 core 热路径同步 upsert；worker 只写单 trace 的 `trace_usage_facts`。`analysis-rollup` 容器每 3 分钟按 3 小时窗口增量重建 `usage_aggregates` 的 hour/day bucket（滞后 ≤ 3 分钟）；`analysis-batch` 容器每小时重建 `baseline_cache` 与训练 Isolation Forest，每 24 小时额外跑一次全量 `usage_aggregates` 对账兜底 late arrival。管理后台 `分析运行` 视图通过 Redis Streams + `analysis_runtime_samples` / `analysis_tasks` 查询实时队列与消费者状态。
 
 工作相关性结果会完整写入 `analysis_results.result_json`。当前语义收敛为：
 - 明确非工作相关：`recommended_action=alert_non_work`，并落库 `non_work_use`
@@ -279,7 +279,7 @@ LLM judge 只处理工作相关性 assessment，不直接生成 `AnomalyAlert`�
 
 ## 数据库 Schema
 
-17 个迁移文件，按编号顺序应用：
+20 个迁移文件，按编号顺序应用：
 
 | 迁移 | 新增内容 |
 |------|---------|
@@ -301,6 +301,8 @@ LLM judge 只处理工作相关性 assessment，不直接生成 `AnomalyAlert`�
 | `0016` | Streams 重构：core/enrichment 阶段、运行时任务与样本表 |
 | `0017` | 运行时 rate KPI 字段 |
 | `0018` | 消息级 content-addressed storage：DROP `normalized_messages` 表（历史数据丢弃），新建 `messages`（canonical）+ `trace_messages`（位置关联），重建 `normalized_messages` 为兼容视图 |
+| `0019` | 异常规则清理：DROP `anomaly_rules` 表（死配置，14 rule_keys，9 dead） |
+| `0020` | Batch 运行时状态：`batch_runtime_state` 表，记录 `usage_aggregates_rebuild.last_full_rebuild_at` |
 
 ## Docker Compose 服务
 
@@ -309,7 +311,8 @@ LLM judge 只处理工作相关性 assessment，不直接生成 `AnomalyAlert`�
 | `audit-gateway` | 本地构建 Dockerfile | 默认启动 | Go 网关（反向代理、采集、trace 持久化） |
 | `analysis-worker` | `uv:python3.11` | 默认启动 | Python 分析 Worker（Redis 消费） |
 | `analysis-enrichment-worker` | `uv:python3.11` | 默认启动 | Python enrichment Worker（消费 `analysis.enrichment` 慢任务） |
-| `analysis-batch` | `uv:python3.11` | 默认启动 | 定时离线批处理（容器内整点调度循环） |
+| `analysis-batch` | `uv:python3.11` | 默认启动 | 每小时重建 `baseline_cache` + 训练 Isolation Forest；每 24 小时跑一次全量 `usage_aggregates` 对账（`BATCH_MODE=full`） |
+| `analysis-rollup` | `uv:python3.11` | 默认启动 | 每 3 分钟按 3 小时窗口增量重建 `usage_aggregates` 的 hour/day bucket（`BATCH_MODE=rollup`） |
 | `postgres` | `pgvector/pgvector:pg16` | 默认启动 | 网关 PostgreSQL（user: `audit`, db: `audit_gateway`，含 pgvector 扩展） |
 | `redis` | `redis:7` | 默认启动 | 任务队列 + 身份缓存 |
 | `migrate` | `postgres:16` | `--profile tools` | 执行 SQL 迁移 |
@@ -319,7 +322,7 @@ LLM judge 只处理工作相关性 assessment，不直接生成 `AnomalyAlert`�
 ```bash
 # Docker Compose 部署
 docker compose -f deploy/docker-compose.yml --env-file .env.local --profile tools run --rm migrate  # 执行迁移（首次）
-docker compose -f deploy/docker-compose.yml --env-file .env.local up -d     # 启动默认服务（含每小时整点离线 batch）
+docker compose -f deploy/docker-compose.yml --env-file .env.local up -d     # 启动默认服务（含每 3 分钟 rollup + 每小时 batch）
 
 # 本地开发
 make dev           # 启动整套本地 compose 栈（ARM Mac 自动叠加 override）

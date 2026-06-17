@@ -53,7 +53,7 @@ new-api 项目的前端网关代理层，仅代理已注册的模型 API 路由�
 4. core 阶段只执行快速工作相关性 heuristic（输出 decision/action/score/evidence，并在 mixed-signal / high-cost / weak-signal 场景标记需要 LLM enrichment）；明确非工作相关直接收敛为 `non_work_use`，`work_nonwork_conflict` 仅保留在 `analysis_results` / `needs_review`，unknown 走 `record_only` 不再生成 `unknown_high_cost`
 5. 当前 worker 新写入/收敛为 5 类 anomaly：`non_work_use`、`high_trace_tokens`、`long_output_anomaly`、`off_hours_high_usage`（core worker 实时产生）以及 `multivariate_anomaly`（离线 batch 用 Isolation Forest 打分产生）
 6. core 阶段成功后按需投递 `analysis.enrichment`
-7. core 热路径只写 `trace_usage_facts`，离线 rollup 再重建 `usage_aggregates` / `baseline_cache`
+7. core 热路径只写 `trace_usage_facts`；`analysis-rollup` 容器每 3 分钟按 3 小时窗口增量重建 `usage_aggregates`（滞后 ≤ 3 分钟）；`analysis-batch` 容器每小时重建 `baseline_cache` 与训练 Isolation Forest，每 24 小时跑一次全量 `usage_aggregates` 对账兜底 late arrival
 8. enrichment worker 消费慢增强任务，在不改写 core 结果的前提下执行 LLM judge，并补写 enrichment 阶段状态与结果
 9. 管理后台 `分析运行` 视图可查看 queue depth、消费者状态和最近 runtime 趋势
 
@@ -122,7 +122,7 @@ cp .env.example .env.local
 # 2. 运行数据库迁移（首次部署及每次版本升级后均需执行）
 docker compose -f deploy/docker-compose.yml --env-file .env.local --profile tools run --rm migrate
 
-# 3. 启动所有服务（包含每小时整点运行的离线 batch）
+# 3. 启动所有服务（包含每 3 分钟 rollup + 每小时 batch）
 docker compose -f deploy/docker-compose.yml --env-file .env.local up -d
 
 # 4. 验证服务状态
@@ -132,7 +132,7 @@ curl http://localhost:8080/readyz     # 就绪探针（所有依赖正常）
 
 ```
 
-`migrate` 服务会在数据库内维护 `schema_migrations` 记录已执行的 SQL 文件；已执行的迁移会自动跳过，只会应用新增的迁移文件。首次部署会顺序应用全部迁移，版本升级后执行同一命令即可增量应用新迁移。重复执行不会产生副作用。`analysis-batch` 会随默认 `docker compose up -d` 一起启动，并在容器内通过内置调度循环于每小时整点执行一次 `uv run python main.py --offline-batch`，负责重建 `usage_aggregates` 与相关 baseline 数据。
+`migrate` 服务会在数据库内维护 `schema_migrations` 记录已执行的 SQL 文件；已执行的迁移会自动跳过，只会应用新增的迁移文件。首次部署会顺序应用全部迁移，版本升级后执行同一命令即可增量应用新迁移。重复执行不会产生副作用。`analysis-batch` 与 `analysis-rollup` 会随默认 `docker compose up -d` 一起启动：`analysis-rollup` 每 3 分钟按 3 小时窗口增量重建 `usage_aggregates`（高频路径，覆盖 worker 延迟 < 3 小时的 late arrival）；`analysis-batch` 每小时重建 `baseline_cache` + 训练 Isolation Forest，每 24 小时额外跑一次全量 `usage_aggregates` 对账兜底长延迟 late arrival。
 
 ### Docker 网络拓扑
 
@@ -176,6 +176,7 @@ NEW_API_POSTGRES_DSN=postgres://root:123456@host.docker.internal:5432/new-api?ss
 │  │ analysis-worker       │ │────▶│  │ (port 3000)  │         │
 │  │ analysis-enrichment   │ │     │  └──────────────┘         │
 │  │ analysis-batch        │ │     │  ┌──────────────┐         │
+│  │ analysis-rollup       │ │     │  └──────────────┘         │
 │  └───────────────────────┘ │     │  └──────────────┘         │
 └────────────────────────────┘     │  ┌──────────────┐         │
                                    │  │  new-api PG  │         │
@@ -310,7 +311,7 @@ make smoke
 
 ### E2E 测试
 
-端到端测试位于 `e2e/` 目录，验证网关代理 → Redis 队列 → Worker 分析 → 数据库写入的完整链路。e2e 采用 docker-native 的 `profile=e2e` on-demand 容器：直接复用已部署的网关 + 常驻 worker（`analysis-worker` / `analysis-enrichment-worker` / `analysis-batch`），不再 `go run` 网关、不发布宿主机端口、不再手动投 list/跑 `--redis-once`。当前保留 5 个端到端用例：
+端到端测试位于 `e2e/` 目录，验证网关代理 → Redis 队列 → Worker 分析 → 数据库写入的完整链路。e2e 采用 docker-native 的 `profile=e2e` on-demand 容器：直接复用已部署的网关 + 常驻 worker（`analysis-worker` / `analysis-enrichment-worker` / `analysis-batch` / `analysis-rollup`），不再 `go run` 网关、不发布宿主机端口、不再手动投 list/跑 `--redis-once`。当前保留 5 个端到端用例：
 
 - `test_smoke.py`：基础连通性 smoke
 - `test_gateway_openai.py`：OpenAI 协议（/v1/chat/completions、/v1/responses，含流式）
