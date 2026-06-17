@@ -1,23 +1,35 @@
 from datetime import datetime, timezone
+from unittest.mock import patch, MagicMock
 
-from batch_scheduler import run_hourly_batch_scheduler, seconds_until_next_hour
+from batch_scheduler import (
+    _sleep_until_next_interval,
+    run_batch_scheduler,
+    run_full_batch_with_daily_reconcile,
+)
 
 
-def test_seconds_until_next_hour_uses_next_hour_boundary():
+def test_sleep_until_next_interval_3min_boundary():
     now = datetime(2026, 6, 9, 10, 15, 30, tzinfo=timezone.utc)
 
-    assert seconds_until_next_hour(now) == 2670.0
+    assert _sleep_until_next_interval(now, 180) == 150.0
 
 
-def test_seconds_until_next_hour_waits_full_hour_on_boundary():
-    now = datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
+def test_sleep_until_next_interval_3min_on_boundary_sleeps_full_interval():
+    now = datetime(2026, 6, 9, 10, 15, 0, tzinfo=timezone.utc)
 
-    assert seconds_until_next_hour(now) == 3600.0
+    assert _sleep_until_next_interval(now, 180) == 180.0
 
 
-def test_run_hourly_batch_scheduler_sleeps_then_runs_once():
+def test_sleep_until_next_interval_hourly_falls_back_to_hour_boundary():
+    """interval=3600 should match the legacy seconds_until_next_hour behavior."""
+    now = datetime(2026, 6, 9, 10, 15, 30, tzinfo=timezone.utc)
+
+    assert _sleep_until_next_interval(now, 3600) == 2670.0
+
+
+def test_run_batch_scheduler_rollup_mode_calls_rebuild_recent():
     sleep_calls = []
-    ran = []
+    runs = []
 
     class FakeConnection:
         def __enter__(self):
@@ -30,20 +42,156 @@ def test_run_hourly_batch_scheduler_sleeps_then_runs_once():
         assert dsn == "postgres://example"
         return FakeConnection()
 
-    def fake_run_batch(connection):
-        ran.append(connection)
-        return {"usage_aggregate_rows": 3}
+    def fake_run_fn(conn, *, window_hours):
+        runs.append({"conn": conn, "window_hours": window_hours})
+        return {"usage_aggregate_rows": 7}
 
     now = datetime(2026, 6, 9, 10, 15, 30, tzinfo=timezone.utc)
-    run_hourly_batch_scheduler(
-        dsn="postgres://example",
+    run_batch_scheduler(
+        "postgres://example",
+        interval_seconds=180,
+        run_fn=fake_run_fn,
+        run_fn_kwargs={"window_hours": 3},
         connect=fake_connect,
-        run_batch=fake_run_batch,
         now_fn=lambda: now,
         sleep_fn=sleep_calls.append,
         log_fn=lambda message: None,
         max_runs=1,
     )
 
-    assert sleep_calls == [2670.0]
-    assert len(ran) == 1
+    assert sleep_calls == [150.0]
+    assert len(runs) == 1
+    assert runs[0]["conn"].__class__.__name__ == "FakeConnection"
+    assert runs[0]["window_hours"] == 3
+
+
+def test_run_full_batch_with_daily_reconcile_triggers_full_on_first_run():
+    now = datetime(2026, 6, 9, 10, 15, 30, tzinfo=timezone.utc)
+    captured = {}
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_run_offline_batch(conn, full_rebuild_aggregates=False):
+        captured["full_rebuild_aggregates"] = full_rebuild_aggregates
+        return {"fingerprints_processed": 0, "baselines_written": 0, "usage_aggregate_rows": 0}
+
+    write_calls = []
+    with patch("batch_scheduler.run_offline_batch", side_effect=fake_run_offline_batch), \
+         patch("batch_scheduler._read_last_full_rebuild_at", return_value=None), \
+         patch(
+             "batch_scheduler._write_last_full_rebuild_at",
+             side_effect=lambda conn, when: write_calls.append(when),
+         ):
+        run_full_batch_with_daily_reconcile(
+            "postgres://example",
+            connect=lambda dsn: FakeConnection(),
+            now_fn=lambda: now,
+            sleep_fn=lambda s: None,
+            log_fn=lambda m: None,
+            max_runs=1,
+        )
+
+    assert captured["full_rebuild_aggregates"] is True
+    # Timestamp written from batch_started_at, not post-batch time.
+    assert write_calls == [now]
+
+
+def test_run_full_batch_with_daily_reconcile_skips_full_within_24h():
+    now = datetime(2026, 6, 9, 10, 15, 30, tzinfo=timezone.utc)
+    last = datetime(2026, 6, 9, 8, 15, 30, tzinfo=timezone.utc)  # 2 hours ago
+    captured = {}
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_run_offline_batch(conn, full_rebuild_aggregates=False):
+        captured["full_rebuild_aggregates"] = full_rebuild_aggregates
+        return {"fingerprints_processed": 0, "baselines_written": 0, "usage_aggregate_rows": 0}
+
+    write_mock = MagicMock()
+    with patch("batch_scheduler.run_offline_batch", side_effect=fake_run_offline_batch), \
+         patch("batch_scheduler._read_last_full_rebuild_at", return_value=last), \
+         patch("batch_scheduler._write_last_full_rebuild_at", write_mock):
+        run_full_batch_with_daily_reconcile(
+            "postgres://example",
+            connect=lambda dsn: FakeConnection(),
+            now_fn=lambda: now,
+            sleep_fn=lambda s: None,
+            log_fn=lambda m: None,
+            max_runs=1,
+        )
+
+    assert captured["full_rebuild_aggregates"] is False
+    assert write_mock.call_count == 0
+
+
+def test_run_full_batch_with_daily_reconcile_triggers_full_after_24h():
+    now = datetime(2026, 6, 9, 10, 15, 30, tzinfo=timezone.utc)
+    last = datetime(2026, 6, 8, 9, 15, 30, tzinfo=timezone.utc)  # 25 hours ago
+    captured = {}
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_run_offline_batch(conn, full_rebuild_aggregates=False):
+        captured["full_rebuild_aggregates"] = full_rebuild_aggregates
+        return {"fingerprints_processed": 0, "baselines_written": 0, "usage_aggregate_rows": 0}
+
+    write_calls = []
+    with patch("batch_scheduler.run_offline_batch", side_effect=fake_run_offline_batch), \
+         patch("batch_scheduler._read_last_full_rebuild_at", return_value=last), \
+         patch(
+             "batch_scheduler._write_last_full_rebuild_at",
+             side_effect=lambda conn, when: write_calls.append(when),
+         ):
+        run_full_batch_with_daily_reconcile(
+            "postgres://example",
+            connect=lambda dsn: FakeConnection(),
+            now_fn=lambda: now,
+            sleep_fn=lambda s: None,
+            log_fn=lambda m: None,
+            max_runs=1,
+        )
+
+    assert captured["full_rebuild_aggregates"] is True
+    assert write_calls == [now]
+
+
+def test_run_full_batch_with_daily_reconcile_does_not_write_timestamp_on_failure():
+    now = datetime(2026, 6, 9, 10, 15, 30, tzinfo=timezone.utc)
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    write_mock = MagicMock()
+    with patch("batch_scheduler.run_offline_batch", side_effect=RuntimeError("boom")), \
+         patch("batch_scheduler._read_last_full_rebuild_at", return_value=None), \
+         patch("batch_scheduler._write_last_full_rebuild_at", write_mock):
+        # Should not raise — the exception is logged inside the loop.
+        run_full_batch_with_daily_reconcile(
+            "postgres://example",
+            connect=lambda dsn: FakeConnection(),
+            now_fn=lambda: now,
+            sleep_fn=lambda s: None,
+            log_fn=lambda m: None,
+            max_runs=1,
+        )
+
+    assert write_mock.call_count == 0
