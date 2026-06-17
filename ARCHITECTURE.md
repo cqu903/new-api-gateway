@@ -269,7 +269,7 @@ LLM judge 只处理工作相关性 assessment，不直接生成 `AnomalyAlert`�
 - `isolation_forest.py` 的 `score_traces()` 离线批量打分，产出第 5 类 `multivariate_anomaly`，依赖 `model_artifacts` 中 `is_active=true` 的最新模型
 - 成本型 trace anomaly 全部使用 `effective_tokens = max(prompt_tokens - cached_tokens, 0) + completion_tokens` 口径，避免缓存命中 prompt token 抬高阈值判断
 
-默认 Docker Compose 会透传 `LLM_JUDGE_*` 到 `analysis-worker` / `analysis-batch` 容器；容器部署时只需在 `--env-file` 指定的 env 文件中配置这些变量即可。
+默认 Docker Compose 会透传 `LLM_JUDGE_*` 到 `analysis-worker` / `analysis-batch` 容器（`analysis-rollup` 不需要 LLM judge，不透传）；容器部署时只需在 `--env-file` 指定的 env 文件中配置这些变量即可。
 
 配置语义：
 - 四个 `LLM_JUDGE_*` 都缺失时，worker 以纯规则模式运行，不报错。
