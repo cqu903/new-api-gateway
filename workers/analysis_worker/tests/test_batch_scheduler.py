@@ -1,8 +1,10 @@
+import json
 from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 
 from batch_scheduler import (
     _sleep_until_next_interval,
+    _write_last_full_rebuild_at,
     run_batch_scheduler,
     run_full_batch_with_daily_reconcile,
 )
@@ -225,3 +227,27 @@ def test_run_full_batch_with_daily_reconcile_applies_wake_offset():
     # _sleep_until_next_interval(10:15:30, 3600) = 2670.0 (to 11:00:00)
     # + 90 offset = 2760.0 (to 11:01:30, avoiding rollup wake at :00/:03/...)
     assert sleep_calls == [2760.0]
+
+
+def test_write_last_full_rebuild_at_passes_valid_json_to_jsonb_column():
+    """Regression: %s::jsonb 需要合法 JSON 文本. 直接传 isoformat() 字符串会报
+    'invalid input syntax for type json' (token '-06' is invalid). 必须用
+    json.dumps() 把字符串包成 JSON string literal."""
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+
+    when = datetime(2026, 6, 17, 9, 12, 30, tzinfo=timezone.utc)
+    _write_last_full_rebuild_at(mock_conn, when)
+
+    assert mock_cursor.execute.call_count == 1
+    args = mock_cursor.execute.call_args.args[1]
+    sql_arg, state_key_arg = args
+    # state_value 那个占位符必须是合法 JSON 字符串字面量, 即 "\"2026-06-17T...\""
+    assert sql_arg == json.dumps(when.isoformat())
+    assert state_key_arg == "usage_aggregates_rebuild"
+    # 烧一下 json.loads 验证合法 JSON, 防止回归
+    parsed = json.loads(sql_arg)
+    assert parsed == when.isoformat()
+    # commit 被调用一次
+    assert mock_conn.commit.call_count == 1

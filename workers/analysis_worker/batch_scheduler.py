@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from datetime import datetime, timezone
@@ -89,7 +90,7 @@ def _write_last_full_rebuild_at(conn, when: datetime) -> None:
             updated_at = now()
         WHERE state_key = %s
         """,
-        (when.isoformat(), STATE_KEY),
+        (json.dumps(when.isoformat()), STATE_KEY),
     )
     conn.commit()
 
