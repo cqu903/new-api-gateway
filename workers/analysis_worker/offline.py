@@ -54,6 +54,56 @@ ON CONFLICT (
     updated_at = now()
 """
 
+# Windowed 版本：高频路径用。第三参数是 window_hours（int），用于过滤源 facts。
+ROLLUP_USAGE_FACTS_WINDOWED = """
+INSERT INTO usage_aggregates (
+    bucket_start, bucket_size, token_fingerprint, new_api_token_id,
+    username, token_name_snapshot, model, route_pattern, protocol_family,
+    request_count, success_count, error_count, stream_count,
+    prompt_tokens, completion_tokens, total_tokens, reasoning_tokens, cached_tokens,
+    request_body_bytes, response_body_bytes
+)
+SELECT
+    date_trunc(%s, request_started_at) AS bucket_start,
+    %s AS bucket_size,
+    token_fingerprint,
+    0 AS new_api_token_id,
+    username,
+    '' AS token_name_snapshot,
+    model,
+    route_pattern,
+    protocol_family,
+    SUM(request_count) AS request_count,
+    SUM(success_count) AS success_count,
+    SUM(error_count) AS error_count,
+    SUM(stream_count) AS stream_count,
+    SUM(prompt_tokens) AS prompt_tokens,
+    SUM(completion_tokens) AS completion_tokens,
+    SUM(total_tokens) AS total_tokens,
+    SUM(reasoning_tokens) AS reasoning_tokens,
+    SUM(cached_tokens) AS cached_tokens,
+    SUM(request_body_bytes) AS request_body_bytes,
+    SUM(response_body_bytes) AS response_body_bytes
+FROM trace_usage_facts
+WHERE request_started_at >= now() - (%s || ' hours')::interval
+GROUP BY 1, 2, 3, 5, 7, 8, 9
+ON CONFLICT (
+    bucket_start, bucket_size, token_fingerprint, username, model, route_pattern, protocol_family
+) DO UPDATE SET
+    request_count = EXCLUDED.request_count,
+    success_count = EXCLUDED.success_count,
+    error_count = EXCLUDED.error_count,
+    stream_count = EXCLUDED.stream_count,
+    prompt_tokens = EXCLUDED.prompt_tokens,
+    completion_tokens = EXCLUDED.completion_tokens,
+    total_tokens = EXCLUDED.total_tokens,
+    reasoning_tokens = EXCLUDED.reasoning_tokens,
+    cached_tokens = EXCLUDED.cached_tokens,
+    request_body_bytes = EXCLUDED.request_body_bytes,
+    response_body_bytes = EXCLUDED.response_body_bytes,
+    updated_at = now()
+"""
+
 TRACE_LEVEL_BASELINES_FROM_FACTS = """
 SELECT
     token_fingerprint AS fingerprint_key,
@@ -68,7 +118,9 @@ HAVING COUNT(*) >= 5
 """
 
 
-def _rebuild_usage_aggregates(connection) -> int:
+def rebuild_usage_aggregates_full(connection) -> int:
+    """全量重建 usage_aggregates 的 hour/day bucket。扫全表 trace_usage_facts。
+    由每日对账和首次启动调用。"""
     cursor = connection.cursor()
     cursor.execute(
         """
@@ -86,6 +138,31 @@ def _rebuild_usage_aggregates(connection) -> int:
     return inserted_rows
 
 
+def rebuild_usage_aggregates_recent(connection, window_hours: int = 3) -> int:
+    """窗口重建：只重建最近 window_hours 的 hour/day bucket。
+    高频路径（analysis-rollup）调用，覆盖 worker 延迟 < window_hours 的 late arrival。"""
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        DELETE FROM usage_aggregates
+        WHERE bucket_size IN ('hour', 'day')
+        AND bucket_start >= now() - (%s || ' hours')::interval
+        """,
+        (str(window_hours),),
+    )
+    inserted_rows = 0
+    for bucket in ("hour", "day"):
+        cursor.execute(
+            ROLLUP_USAGE_FACTS_WINDOWED,
+            (bucket, bucket, window_hours),
+        )
+        rowcount = getattr(cursor, "rowcount", 0)
+        if isinstance(rowcount, int) and rowcount > 0:
+            inserted_rows += rowcount
+    connection.commit()
+    return inserted_rows
+
+
 def load_trace_level_rows(connection, lookback_days: int) -> list[dict]:
     cursor = connection.cursor()
     cursor.execute(TRACE_LEVEL_BASELINES_FROM_FACTS, (str(lookback_days),))
@@ -93,9 +170,11 @@ def load_trace_level_rows(connection, lookback_days: int) -> list[dict]:
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def run_offline_batch(connection, lookback_days: int = 7) -> dict:
+def run_offline_batch(connection, lookback_days: int = 7, full_rebuild_aggregates: bool = False) -> dict:
     cursor = connection.cursor()
-    usage_aggregate_rows = _rebuild_usage_aggregates(connection)
+    usage_aggregate_rows = 0
+    if full_rebuild_aggregates:
+        usage_aggregate_rows = rebuild_usage_aggregates_full(connection)
 
     # 1. Upsert trace-level baselines
     fact_trace_rows = load_trace_level_rows(connection, lookback_days)

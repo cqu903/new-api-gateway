@@ -143,6 +143,25 @@ services:
     volumes:
       - ..:/workspace
     command: ["sh", "-c", "uv sync --quiet && exec uv run python batch_scheduler.py"]
+  analysis-rollup:
+    image: ghcr.io/astral-sh/uv:python3.11-bookworm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /workspace/workers/analysis_worker
+    environment:
+      BATCH_MODE: "rollup"
+      ROLLUP_INTERVAL_SECONDS: "180"
+      ROLLUP_WINDOW_HOURS: "3"
+      POSTGRES_DSN: ${ANALYSIS_WORKER_POSTGRES_DSN:-postgres://audit:audit@postgres:5432/audit_gateway?sslmode=disable}
+      PYTHONDONTWRITEBYTECODE: "1"
+      UV_CACHE_DIR: /tmp/uv-cache
+      UV_PROJECT_ENVIRONMENT: /tmp/analysis-worker-venv
+      UV_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+      UV_INDEX_STRATEGY: unsafe-best-match
+    volumes:
+      - ..:/workspace
+    command: ["sh", "-c", "uv sync --quiet && exec uv run python batch_scheduler.py"]
 
   # ── On-demand services ─────────────────────────────
   migrate:
