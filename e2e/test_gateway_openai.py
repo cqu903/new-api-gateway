@@ -37,8 +37,12 @@ def test_gateway_openai_capture():
     results = []  # (endpoint, turn, trace_id)
 
     # chat turn 1
+    # NOTE: prompt must be an explicit instruction, not a bare greeting like
+    # "hello" — the upstream new-api returns an empty SSE for short/common
+    # prompts on this non-stream chat path (model-specific quirk); see
+    # test_gateway_openai_capture history / CLAUDE.md.
     r1, e1 = _post("/v1/chat/completions",
-                   {"model": OPENAI_MODEL, "messages": [{"role": "user", "content": "hello"}], "max_tokens": 10},
+                   {"model": OPENAI_MODEL, "messages": [{"role": "user", "content": "Reply with exactly: hello"}], "max_tokens": 10},
                    "/v1/chat/completions:turn1")
     if not e1 and r1 is not None:
         reply1 = r1.json()["choices"][0]["message"].get("content", "") or ""
@@ -46,9 +50,9 @@ def test_gateway_openai_capture():
         # chat turn 2 (multi-turn)
         r2, e2 = _post("/v1/chat/completions",
                        {"model": OPENAI_MODEL,
-                        "messages": [{"role": "user", "content": "hello"},
+                        "messages": [{"role": "user", "content": "Reply with exactly: hello"},
                                      {"role": "assistant", "content": reply1},
-                                     {"role": "user", "content": "what is 1+1?"}],
+                                     {"role": "user", "content": "Reply with exactly: hi"}],
                         "max_tokens": 10},
                        "/v1/chat/completions:turn2")
         if not e2 and r2 is not None:
