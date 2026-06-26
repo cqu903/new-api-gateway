@@ -34,6 +34,10 @@ const state = {
   traces: {
     page: 1,
     pageSize: 50,
+    username: "",
+    traceId: "",
+    tokenFingerprint: "",
+    needsReview: false,
   },
   analysisRuntime: {
     stage: "core",
@@ -685,7 +689,13 @@ async function selectUsageEmployee(username) {
 async function loadTraces() {
   const requestSeq = ++traceRequestSeq;
   const requestedPage = Math.max(1, finiteNumber(state.traces.page) || 1);
-  const params = queryString({ page: requestedPage });
+  const params = queryString({
+    page: requestedPage,
+    username: state.traces.username,
+    trace_id: state.traces.traceId,
+    token_fingerprint: state.traces.tokenFingerprint,
+    needs_review: state.traces.needsReview ? "1" : "",
+  });
   let body;
   try {
     body = await api(`/traces?${params}`);
@@ -1202,6 +1212,15 @@ function tracePageNumbers(pagination) {
     .sort((a, b) => a - b);
 }
 
+// parseTraceJumpPage 把跳页输入解析为 [1, totalPages] 内的整数；非法/越界返回 null。
+function parseTraceJumpPage(raw, totalPages) {
+  const trimmed = String(raw ?? "").trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1 || n > totalPages) return null;
+  return n;
+}
+
 function tracePaginationHTML(pagination) {
   if (pagination.totalItems === 0 || pagination.totalPages === 0) {
     return `<div class="pagination-bar"><div class="pagination-summary">共 0 条</div></div>`;
@@ -1227,6 +1246,7 @@ function tracePaginationHTML(pagination) {
         ${pageButtons.join("")}
         <button type="button" data-trace-page="${pagination.page + 1}" ${pagination.hasNext ? "" : "disabled"}>下一页</button>
         <button type="button" data-trace-page="${pagination.totalPages}" ${pagination.hasNext ? "" : "disabled"}>末页</button>
+        <span class="pagination-jump">跳至 <input type="number" id="trace-jump-page" min="1" max="${pagination.totalPages}" value="${pagination.page}"> 页 <button type="button" id="trace-jump-go">跳转</button></span>
       </div>
     </div>
   `;
@@ -1244,6 +1264,85 @@ function bindTracePagination() {
       renderShell(`<section class="loading-panel">正在加载Trace...</section>`);
       await loadView();
     });
+  });
+
+  const jumpInput = document.querySelector("#trace-jump-page");
+  const jumpGo = document.querySelector("#trace-jump-go");
+  if (!jumpInput || !jumpGo) return;
+  const go = async () => {
+    const totalPages = Number(jumpInput.max) || 0;
+    const next = parseTraceJumpPage(jumpInput.value, totalPages);
+    if (next === null) {
+      jumpInput.classList.add("invalid");
+      return;
+    }
+    jumpInput.classList.remove("invalid");
+    if (next === state.traces.page) return;
+    state.traces.page = next;
+    renderShell(`<section class="loading-panel">正在加载Trace...</section>`);
+    await loadView();
+  };
+  jumpGo.addEventListener("click", go);
+  jumpInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      go();
+    }
+  });
+}
+
+function traceFiltersHTML() {
+  return `
+    <section class="panel">
+      <form class="filters" id="trace-filters" autocomplete="off">
+        <div class="field">
+          <label for="trace-filter-username">员工 (前缀)</label>
+          <input type="text" id="trace-filter-username" name="username" value="${escapeHTML(state.traces.username)}" placeholder="例如 E1001">
+        </div>
+        <div class="field">
+          <label for="trace-filter-trace-id">Trace ID</label>
+          <input type="text" id="trace-filter-trace-id" name="trace_id" value="${escapeHTML(state.traces.traceId)}" placeholder="精确匹配">
+        </div>
+        <div class="field">
+          <label for="trace-filter-token">Token 指纹</label>
+          <input type="text" id="trace-filter-token" name="token_fingerprint" value="${escapeHTML(state.traces.tokenFingerprint)}" placeholder="精确匹配">
+        </div>
+        <div class="field">
+          <label class="checkbox">
+            <input type="checkbox" id="trace-filter-needs-review" name="needs_review" value="1" ${state.traces.needsReview ? "checked" : ""}>
+            仅看待复核
+          </label>
+        </div>
+        <div class="field">
+          <button type="submit" class="primary">搜索</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+// applyTraceSearch 把过滤栏当前 DOM 值写回 state.traces（生效过滤）并重置到第 1 页。
+// 与「生效过滤不变」约束配合：翻页/跳页不改这里读写的字段，只改 page。
+function applyTraceSearch() {
+  const username = document.querySelector("#trace-filter-username");
+  const traceId = document.querySelector("#trace-filter-trace-id");
+  const token = document.querySelector("#trace-filter-token");
+  const needsReview = document.querySelector("#trace-filter-needs-review");
+  state.traces.username = username ? username.value.trim() : "";
+  state.traces.traceId = traceId ? traceId.value.trim() : "";
+  state.traces.tokenFingerprint = token ? token.value.trim() : "";
+  state.traces.needsReview = needsReview ? needsReview.checked : false;
+  state.traces.page = 1;
+}
+
+function bindTraceSearch() {
+  const form = document.querySelector("#trace-filters");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    applyTraceSearch();
+    renderShell(`<section class="loading-panel">正在加载Trace...</section>`);
+    await loadView();
   });
 }
 
@@ -1267,9 +1366,10 @@ function renderTraces(body) {
   renderShell(
     page(
       "Trace",
-      `<section class="panel">${table(["Trace", "时间 (UTC+8)", "员工", "Model", "Route", "Status", "Input", "Output", "Cached", "Total"], rows)}${tracePaginationHTML(pagination)}</section>`,
+      `${traceFiltersHTML()}<section class="panel">${table(["Trace", "时间 (UTC+8)", "员工", "Model", "Route", "Status", "Input", "Output", "Cached", "Total"], rows)}${tracePaginationHTML(pagination)}</section>`,
     ),
   );
+  bindTraceSearch();
   bindTracePagination();
   document.querySelectorAll("[data-trace-id]").forEach((button) => {
     button.addEventListener("click", async () => {

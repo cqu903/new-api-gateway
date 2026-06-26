@@ -82,6 +82,7 @@ type TraceFilter struct {
 	RoutePattern     string
 	Model            string
 	StatusCode       int
+	NeedsReview      bool
 	Page             int
 	Limit            int
 }

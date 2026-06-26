@@ -257,7 +257,7 @@ stateDiagram-v2
 - 工作/非工作冲突：`recommended_action=review_conflict`，只保留在 `analysis_results` / `needs_review`，不再写 `work_nonwork_conflict` anomaly
 - unknown：`recommended_action=record_only`，仅保留分析结果，不再写 `unknown_high_cost` anomaly
 
-Trace 列表支持固定 50 条/页的页码分页；列表中的 `needs_review` 只对应 `analysis_results` 里的 review 语义。trace 详情页会额外返回关联 anomaly 摘要，且每条 anomaly 同时带原始 `reason` 与 `display_reason`。其中 `display_reason` 仅对当前支持的类型生成中文文案，未知或历史类型回退原始 `reason`。
+Trace 列表支持固定 50 条/页的页码分页，并可按员工前缀（ILIKE）、Trace ID（精确）、Token 指纹（精确）、仅看待复核筛选，翻页栏支持页码跳转（越界/非数字/空值不发请求）；列表中的 `needs_review` 只对应 `analysis_results` 里的 review 语义。trace 详情页会额外返回关联 anomaly 摘要，且每条 anomaly 同时带原始 `reason` 与 `display_reason`。其中 `display_reason` 仅对当前支持的类型生成中文文案，未知或历史类型回退原始 `reason`。
 
 ### 工作相关性识别 V2
 

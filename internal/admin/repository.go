@@ -216,6 +216,13 @@ func normalizeTraceListLimit(limit int) int {
 	return limit
 }
 
+// escapeILIKE 转义 ILIKE 元字符（\ % _），配合 SQL 的 ESCAPE '\' 使用，
+// 使外部输入被当字面量而非通配符。escape char 固定为反斜杠。
+func escapeILIKE(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
+}
+
 func traceFilterWhereArgs(filter TraceFilter) ([]string, []any) {
 	where := []string{"1=1"}
 	args := []any{}
@@ -227,7 +234,7 @@ func traceFilterWhereArgs(filter TraceFilter) ([]string, []any) {
 		add("t.trace_id = $%d", filter.TraceID)
 	}
 	if filter.Username != "" {
-		add("t.username_snapshot = $%d", filter.Username)
+		add("t.username_snapshot ILIKE $%d ESCAPE '\\'", escapeILIKE(filter.Username)+"%")
 	}
 	if filter.TokenFingerprint != "" {
 		add("t.token_fingerprint = $%d", filter.TokenFingerprint)
@@ -240,6 +247,9 @@ func traceFilterWhereArgs(filter TraceFilter) ([]string, []any) {
 	}
 	if filter.StatusCode != 0 {
 		add("t.status_code = $%d", filter.StatusCode)
+	}
+	if filter.NeedsReview {
+		where = append(where, "EXISTS(SELECT 1 FROM analysis_results WHERE trace_id = t.trace_id AND severity = 'review')")
 	}
 	return where, args
 }
