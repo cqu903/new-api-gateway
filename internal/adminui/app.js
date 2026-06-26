@@ -34,6 +34,10 @@ const state = {
   traces: {
     page: 1,
     pageSize: 50,
+    username: "",
+    traceId: "",
+    tokenFingerprint: "",
+    needsReview: false,
   },
   analysisRuntime: {
     stage: "core",
@@ -685,7 +689,13 @@ async function selectUsageEmployee(username) {
 async function loadTraces() {
   const requestSeq = ++traceRequestSeq;
   const requestedPage = Math.max(1, finiteNumber(state.traces.page) || 1);
-  const params = queryString({ page: requestedPage });
+  const params = queryString({
+    page: requestedPage,
+    username: state.traces.username,
+    trace_id: state.traces.traceId,
+    token_fingerprint: state.traces.tokenFingerprint,
+    needs_review: state.traces.needsReview ? "1" : "",
+  });
   let body;
   try {
     body = await api(`/traces?${params}`);
