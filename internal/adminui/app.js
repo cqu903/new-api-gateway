@@ -1403,7 +1403,7 @@ function renderIdentities(body) {
   );
 }
 
-function renderTraceDetail(body) {
+function renderTraceDetail(body, returnView = "traces") {
   body = body || {};
   const trace = body.trace || {};
   const evidenceLinks = ["request_body", "response_body"]
@@ -1463,23 +1463,37 @@ function renderTraceDetail(body) {
     ),
   );
   document.querySelector("#back-to-traces").addEventListener("click", async () => {
-    state.view = "traces";
+    state.view = returnView;
     await loadView();
   });
 }
 
 function renderAnomalies(body) {
   body = body || {};
-  const rows = arrayValue(body.anomalies).map((item) => [
-    item.anomaly_id,
-    formatTime(item.created_at),
-    badge(item.severity),
-    item.anomaly_type,
-    item.username || item.fingerprint_display,
-    item.observed_value,
-    item.display_reason || item.reason,
-  ]);
-  renderShell(page("异常", `<section class="panel">${table(["ID", "时间 (UTC+8)", "Severity", "类型", "员工", "观测值", "原因"], rows)}</section>`));
+  const rows = arrayValue(body.anomalies).map((item) => {
+    const ids = arrayValue(item.sample_trace_ids);
+    return [
+      ids.length ? traceButton(ids[0]) : "—",
+      item.anomaly_id,
+      formatTime(item.created_at),
+      badge(item.severity),
+      item.anomaly_type,
+      item.username || item.fingerprint_display,
+      item.observed_value,
+      item.display_reason || item.reason,
+    ];
+  });
+  renderShell(page("异常", `<section class="panel">${table(["Trace", "ID", "时间 (UTC+8)", "Severity", "类型", "员工", "观测值", "原因"], rows)}</section>`));
+  document.querySelectorAll("[data-trace-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        const detail = await api(`/traces/${encodeURIComponent(button.dataset.traceId)}`);
+        renderTraceDetail(detail, "anomalies");
+      } catch (error) {
+        renderShell(page("Trace", `<section class="panel error">${escapeHTML(error.message)}</section>`));
+      }
+    });
+  });
 }
 
 function renderCoverage(body) {

@@ -31,7 +31,13 @@ function loadAppModule(overrides = {}) {
         if (selector === ".main") return fakeElement;
         return null;
       },
-      querySelectorAll() { return []; },
+      querySelectorAll(selector) {
+        if (typeof overrides.querySelectorAll === "function") {
+          const r = overrides.querySelectorAll(selector);
+          if (r !== undefined) return r;
+        }
+        return [];
+      },
     },
     window: { innerHeight: 900, innerWidth: 1440, UsagePage: { renderUsagePage: () => "" }, AdminAnalysisResultCards: { renderAnalysisResultCards: () => "" }, Chart: overrides.Chart || function Chart() {} },
     fetch: overrides.fetch || (async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" })),
@@ -44,6 +50,8 @@ module.exports = {
   state,
   loadTraces,
   renderTraces,
+  renderAnomalies: typeof renderAnomalies !== "undefined" ? renderAnomalies : undefined,
+  renderTraceDetail: typeof renderTraceDetail !== "undefined" ? renderTraceDetail : undefined,
   applyTraceSearch: typeof applyTraceSearch !== "undefined" ? applyTraceSearch : undefined,
   parseTraceJumpPage: typeof parseTraceJumpPage !== "undefined" ? parseTraceJumpPage : undefined,
 };`,
@@ -133,4 +141,69 @@ test("renderTraces emits a jump-to-page input bounded by total pages", () => {
   app.renderTraces({ traces: [], pagination: { page: 2, page_size: 50, total_items: 150, total_pages: 3, has_prev: true, has_next: true } });
   assert.match(fakeApp.innerHTML, /id="trace-jump-page"[^>]*min="1"[^>]*max="3"/);
   assert.match(fakeApp.innerHTML, /id="trace-jump-go"/);
+});
+
+test("renderTraceDetail back button returns to the provided view and defaults to traces", async () => {
+  let backHandler;
+  const backBtn = {
+    addEventListener(evt, cb) { backHandler = cb; },
+    removeEventListener() {}, getAttribute() { return ""; },
+    matches() { return false; }, closest() { return null; },
+    style: {}, textContent: "",
+  };
+  const { app } = loadAppModule({
+    querySelector: (sel) => (sel === "#back-to-traces" ? backBtn : undefined),
+    fetch: async (url) => {
+      const json = url.includes("/anomalies")
+        ? { anomalies: [] }
+        : url.includes("/traces")
+          ? { traces: [], pagination: { page: 1, page_size: 50, total_items: 0, total_pages: 0, has_prev: false, has_next: false } }
+          : {};
+      return { ok: true, status: 200, json: async () => json, text: async () => "" };
+    },
+  });
+
+  app.renderTraceDetail({ trace: { trace_id: "trace_123" } }, "anomalies");
+  assert.equal(typeof backHandler, "function");
+  await backHandler();
+  assert.equal(app.state.view, "anomalies");
+
+  app.renderTraceDetail({ trace: { trace_id: "trace_456" } });
+  assert.equal(typeof backHandler, "function");
+  await backHandler();
+  assert.equal(app.state.view, "traces");
+});
+
+test("renderAnomalies shows a trace link when sample_trace_ids is non-empty and omits it when empty", () => {
+  const { app, fakeApp } = loadAppModule();
+  app.renderAnomalies({ anomalies: [{ anomaly_id: "anom_1", sample_trace_ids: ["trace_123"], severity: "high", anomaly_type: "high_trace_tokens", created_at: "2026-04-28T10:00:00Z", observed_value: "48200", display_reason: "x" }] });
+  assert.match(fakeApp.innerHTML, /data-trace-id="trace_123"/);
+
+  app.renderAnomalies({ anomalies: [{ anomaly_id: "anom_2", sample_trace_ids: [], severity: "medium", anomaly_type: "off_hours_high_usage", created_at: "2026-04-28T11:00:00Z", observed_value: "22500", display_reason: "y" }] });
+  assert.doesNotMatch(fakeApp.innerHTML, /data-trace-id=/);
+});
+
+test("clicking an anomaly trace button opens the corresponding trace detail", async () => {
+  const fetchCalls = [];
+  let traceClickHandler;
+  const traceBtn = { dataset: { traceId: "trace_123" }, addEventListener(evt, cb) { traceClickHandler = cb; } };
+  const backBtn = { addEventListener() {}, removeEventListener() {}, getAttribute() { return ""; }, matches() { return false; }, closest() { return null; }, style: {}, textContent: "" };
+  const { app, fakeApp } = loadAppModule({
+    querySelector: (sel) => (sel === "#back-to-traces" ? backBtn : undefined),
+    querySelectorAll: (sel) => (sel === "[data-trace-id]" ? [traceBtn] : []),
+    fetch: async (url) => {
+      fetchCalls.push(url);
+      if (url.includes("/traces/trace_123")) {
+        return { ok: true, status: 200, json: async () => ({ trace: { trace_id: "trace_123" } }), text: async () => "" };
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+    },
+  });
+  app.state.view = "anomalies";
+  app.renderAnomalies({ anomalies: [{ anomaly_id: "anom_1", sample_trace_ids: ["trace_123"], severity: "high", anomaly_type: "high_trace_tokens", created_at: "2026-04-28T10:00:00Z", observed_value: "48200", display_reason: "x" }] });
+
+  assert.equal(typeof traceClickHandler, "function");
+  await traceClickHandler();
+  assert.ok(fetchCalls.some((u) => u.includes("/admin/api/traces/trace_123")));
+  assert.match(fakeApp.innerHTML, /Trace 详情/);
 });
