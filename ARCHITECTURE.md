@@ -259,6 +259,8 @@ stateDiagram-v2
 
 Trace 列表支持固定 50 条/页的页码分页，并可按员工前缀（ILIKE）、Trace ID（精确）、Token 指纹（精确）、仅看待复核筛选，翻页栏支持页码跳转（越界/非数字/空值不发请求）；列表中的 `needs_review` 只对应 `analysis_results` 里的 review 语义。trace 详情页会额外返回关联 anomaly 摘要，且每条 anomaly 同时带原始 `reason` 与 `display_reason`。其中 `display_reason` 仅对当前支持的类型生成中文文案，未知或历史类型回退原始 `reason`。
 
+异常列表与 Trace 列表同构：固定 50 条/页的页码分页（首页/上一页/页码/下一页/末页 + 跳转输入，越界/非数字/空值不发请求），并可按 `anomaly_type` 单选筛选（下拉含「全部」+ 5 种 live 类型：`high_trace_tokens`/`long_output_anomaly`/`off_hours_high_usage`/`non_work_use`/`multivariate_anomaly`）。后端 `GET /admin/api/anomalies?page=N&anomaly_type=XXX` 返回 `{anomalies:[…], pagination:{…}}`，复用通用 `Pagination` 类型；`usage_anomalies(anomaly_type, created_at)` 索引支撑筛选+排序。
+
 ### 工作相关性识别 V2
 
 Worker 使用 `context_catalog` 的 aliases/keywords、独立 non-work 规则和 token 成本分层生成 `WorkRelevanceAssessment`。当规则冲突、弱信号中高成本、或高成本无强工作证据时，可调用外部 OpenAI-compatible vLLM endpoint 作为 LLM judge。

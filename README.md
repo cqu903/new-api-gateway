@@ -59,6 +59,7 @@ new-api 项目的前端网关代理层，仅代理已注册的模型 API 路由�
 
 其中成本类异常统一基于 `effective_tokens = max(prompt_tokens - cached_tokens, 0) + completion_tokens` 计算，避免缓存命中 prompt token 被重复计入高成本判断。
 管理端异常列表与详情展示会同时返回 `display_reason` 和 worker 原始 `reason`；`display_reason` 会为当前支持的 anomaly type 生成中文展示文案，未知或历史类型则回退原始 `reason`。
+管理端异常列表支持按 `anomaly_type` 单选筛选与 50 条/页的页码分页（含页码跳转）。
 
 ## 中转路由清单
 
