@@ -216,6 +216,13 @@ func normalizeTraceListLimit(limit int) int {
 	return limit
 }
 
+// escapeILIKE 转义 ILIKE 元字符（\ % _），配合 SQL 的 ESCAPE '\' 使用，
+// 使外部输入被当字面量而非通配符。escape char 固定为反斜杠。
+func escapeILIKE(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
+}
+
 func traceFilterWhereArgs(filter TraceFilter) ([]string, []any) {
 	where := []string{"1=1"}
 	args := []any{}

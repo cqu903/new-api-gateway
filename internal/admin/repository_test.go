@@ -1638,3 +1638,20 @@ func anyStrings(values []any) []string {
 	}
 	return out
 }
+
+func TestEscapeILIKEEscapesMetacharacters(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"plain", "plain"},
+		{"a_b", `a\_b`},
+		{"a%c", `a\%c`},
+		{`a\b`, `a\\b`},
+		{"a_b%c", `a\_b\%c`},
+	}
+	for _, c := range cases {
+		if got := escapeILIKE(c.in); got != c.want {
+			t.Fatalf("escapeILIKE(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

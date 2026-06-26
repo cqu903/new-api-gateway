@@ -322,6 +322,16 @@ func (h Handler) requireCSRF(next http.Handler) http.Handler {
 	})
 }
 
+// parseBoolQueryParam 解析查询参数里的布尔值：仅 "1" / "true"（大小写不敏感、trim）为真，其余为假。
+func parseBoolQueryParam(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true":
+		return true
+	default:
+		return false
+	}
+}
+
 func (h Handler) listTraces(w http.ResponseWriter, r *http.Request) {
 	page := 1
 	if rawPage := strings.TrimSpace(r.URL.Query().Get("page")); rawPage != "" {

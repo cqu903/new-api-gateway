@@ -2538,3 +2538,18 @@ func assertClearSessionCookie(t *testing.T, cookies []*http.Cookie) {
 	}
 	t.Fatalf("clear cookie not found in %#v", cookies)
 }
+
+func TestParseBoolQueryParam(t *testing.T) {
+	truthy := []string{"1", "true", "TRUE", "True", " 1 ", " true "}
+	falsy := []string{"", "0", "false", "no", "bogus", "  "}
+	for _, v := range truthy {
+		if !parseBoolQueryParam(v) {
+			t.Fatalf("parseBoolQueryParam(%q) = false, want true", v)
+		}
+	}
+	for _, v := range falsy {
+		if parseBoolQueryParam(v) {
+			t.Fatalf("parseBoolQueryParam(%q) = true, want false", v)
+		}
+	}
+}
