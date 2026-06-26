@@ -1212,6 +1212,15 @@ function tracePageNumbers(pagination) {
     .sort((a, b) => a - b);
 }
 
+// parseTraceJumpPage 把跳页输入解析为 [1, totalPages] 内的整数；非法/越界返回 null。
+function parseTraceJumpPage(raw, totalPages) {
+  const trimmed = String(raw ?? "").trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1 || n > totalPages) return null;
+  return n;
+}
+
 function tracePaginationHTML(pagination) {
   if (pagination.totalItems === 0 || pagination.totalPages === 0) {
     return `<div class="pagination-bar"><div class="pagination-summary">共 0 条</div></div>`;
@@ -1237,6 +1246,7 @@ function tracePaginationHTML(pagination) {
         ${pageButtons.join("")}
         <button type="button" data-trace-page="${pagination.page + 1}" ${pagination.hasNext ? "" : "disabled"}>下一页</button>
         <button type="button" data-trace-page="${pagination.totalPages}" ${pagination.hasNext ? "" : "disabled"}>末页</button>
+        <span class="pagination-jump">跳至 <input type="number" id="trace-jump-page" min="1" max="${pagination.totalPages}" value="${pagination.page}"> 页 <button type="button" id="trace-jump-go">跳转</button></span>
       </div>
     </div>
   `;
@@ -1254,6 +1264,30 @@ function bindTracePagination() {
       renderShell(`<section class="loading-panel">正在加载Trace...</section>`);
       await loadView();
     });
+  });
+
+  const jumpInput = document.querySelector("#trace-jump-page");
+  const jumpGo = document.querySelector("#trace-jump-go");
+  if (!jumpInput || !jumpGo) return;
+  const go = async () => {
+    const totalPages = Number(jumpInput.max) || 0;
+    const next = parseTraceJumpPage(jumpInput.value, totalPages);
+    if (next === null) {
+      jumpInput.classList.add("invalid");
+      return;
+    }
+    jumpInput.classList.remove("invalid");
+    if (next === state.traces.page) return;
+    state.traces.page = next;
+    renderShell(`<section class="loading-panel">正在加载Trace...</section>`);
+    await loadView();
+  };
+  jumpGo.addEventListener("click", go);
+  jumpInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      go();
+    }
   });
 }
 

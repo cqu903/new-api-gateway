@@ -111,3 +111,26 @@ test("applyTraceSearch reads filter inputs into state and resets page to 1", () 
   assert.equal(app.state.traces.needsReview, true);
   assert.equal(app.state.traces.page, 1);
 });
+
+test("parseTraceJumpPage validates page input against total pages", () => {
+  const { app } = loadAppModule();
+  const total = 5;
+  assert.equal(app.parseTraceJumpPage("3", total), 3);
+  assert.equal(app.parseTraceJumpPage(" 2 ", total), 2);
+  assert.equal(app.parseTraceJumpPage("1", total), 1);
+  assert.equal(app.parseTraceJumpPage("5", total), 5);
+  assert.equal(app.parseTraceJumpPage("", total), null);
+  assert.equal(app.parseTraceJumpPage("abc", total), null);
+  assert.equal(app.parseTraceJumpPage("0", total), null);
+  assert.equal(app.parseTraceJumpPage("6", total), null);
+  assert.equal(app.parseTraceJumpPage("-1", total), null);
+  assert.equal(app.parseTraceJumpPage("2.5", total), null);
+});
+
+test("renderTraces emits a jump-to-page input bounded by total pages", () => {
+  const { app, fakeApp } = loadAppModule();
+  app.state.view = "traces";
+  app.renderTraces({ traces: [], pagination: { page: 2, page_size: 50, total_items: 150, total_pages: 3, has_prev: true, has_next: true } });
+  assert.match(fakeApp.innerHTML, /id="trace-jump-page"[^>]*min="1"[^>]*max="3"/);
+  assert.match(fakeApp.innerHTML, /id="trace-jump-go"/);
+});
