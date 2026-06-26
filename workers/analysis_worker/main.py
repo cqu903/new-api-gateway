@@ -90,6 +90,7 @@ def create_llm_judge_from_env() -> LLMJudgeClient | None:
     model = os.environ.get("LLM_JUDGE_MODEL", "").strip()
     api_key_raw = os.environ.get("LLM_JUDGE_API_KEY")
     timeout_raw_env = os.environ.get("LLM_JUDGE_TIMEOUT_SECONDS")
+    org_business_domain = os.environ.get("ORG_BUSINESS_DOMAIN", "").strip()
     if not any((base_url, model, api_key_raw is not None, timeout_raw_env is not None)):
         return None
     if not base_url or not model:
@@ -112,6 +113,7 @@ def create_llm_judge_from_env() -> LLMJudgeClient | None:
         model=model,
         api_key=api_key,
         timeout_seconds=timeout_seconds,
+        org_business_domain=org_business_domain,
     )
 
 

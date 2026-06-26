@@ -4475,3 +4475,26 @@ def test_enrichment_stage_emits_non_work_anomaly_for_off_domain_verdict(monkeypa
 
     assert len(saved["anomalies"]) == 1
     assert saved["anomalies"][0].anomaly_type == "non_work_use"
+
+
+def test_create_llm_judge_from_env_passes_org_business_domain(monkeypatch):
+    monkeypatch.setenv("LLM_JUDGE_BASE_URL", "https://judge.example.com")
+    monkeypatch.setenv("LLM_JUDGE_MODEL", "judge-model")
+    monkeypatch.setenv("ORG_BUSINESS_DOMAIN", "金融服务")
+
+    client = create_llm_judge_from_env()
+
+    assert client is not None
+    assert client.org_business_domain == "金融服务"
+    assert "金融服务" in client.system_prompt
+
+
+def test_create_llm_judge_from_env_defaults_org_business_domain_empty(monkeypatch):
+    monkeypatch.setenv("LLM_JUDGE_BASE_URL", "https://judge.example.com")
+    monkeypatch.setenv("LLM_JUDGE_MODEL", "judge-model")
+    monkeypatch.delenv("ORG_BUSINESS_DOMAIN", raising=False)
+
+    client = create_llm_judge_from_env()
+
+    assert client is not None
+    assert client.org_business_domain == ""
