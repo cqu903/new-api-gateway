@@ -593,8 +593,7 @@ async function loadView() {
       const body = await api("/token-identities");
       renderIdentities(body);
     } else if (state.view === "anomalies") {
-      const body = await api("/anomalies");
-      renderAnomalies(body);
+      await loadAnomalies();
     } else if (state.view === "coverage") {
       const body = await api("/coverage-alerts");
       renderCoverage(body);
@@ -715,6 +714,78 @@ async function loadTraces() {
     return;
   }
   renderTraces(body);
+}
+
+async function loadAnomalies() {
+  const requestSeq = ++anomalyRequestSeq;
+  const requestedPage = Math.max(1, finiteNumber(state.anomalies.page) || 1);
+  const params = queryString({
+    page: requestedPage,
+    anomaly_type: state.anomalies.anomalyType,
+  });
+  let body;
+  try {
+    body = await api(`/anomalies?${params}`);
+  } catch (error) {
+    if (requestSeq !== anomalyRequestSeq || state.view !== "anomalies" || state.anomalies.page !== requestedPage) {
+      return;
+    }
+    throw error;
+  }
+  if (requestSeq !== anomalyRequestSeq || state.view !== "anomalies" || state.anomalies.page !== requestedPage) {
+    return;
+  }
+  renderAnomalies(body);
+}
+
+function bindAnomalyPagination() {
+  document.querySelectorAll("[data-anomaly-page]").forEach((button) => {
+    if (button.disabled) return;
+    button.addEventListener("click", async () => {
+      const nextPage = Number(button.dataset.anomalyPage || 1);
+      if (!Number.isFinite(nextPage) || nextPage < 1 || nextPage === state.anomalies.page) {
+        return;
+      }
+      state.anomalies.page = nextPage;
+      renderShell(`<section class="loading-panel">正在加载异常...</section>`);
+      await loadView();
+    });
+  });
+
+  const jumpInput = document.querySelector("#anomaly-jump-page");
+  const jumpGo = document.querySelector("#anomaly-jump-go");
+  if (!jumpInput || !jumpGo) return;
+  const go = async () => {
+    const totalPages = Number(jumpInput.max) || 0;
+    const next = parseAnomalyJumpPage(jumpInput.value, totalPages);
+    if (next === null) {
+      jumpInput.classList.add("invalid");
+      return;
+    }
+    jumpInput.classList.remove("invalid");
+    if (next === state.anomalies.page) return;
+    state.anomalies.page = next;
+    renderShell(`<section class="loading-panel">正在加载异常...</section>`);
+    await loadView();
+  };
+  jumpGo.addEventListener("click", go);
+  jumpInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      go();
+    }
+  });
+}
+
+function bindAnomalySearch() {
+  const form = document.querySelector("#anomaly-filters");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    applyAnomalyFilter();
+    renderShell(`<section class="loading-panel">正在加载异常...</section>`);
+    await loadView();
+  });
 }
 
 async function reloadUsageView() {
@@ -1588,6 +1659,9 @@ function renderTraceDetail(body, returnView = "traces") {
 
 function renderAnomalies(body) {
   body = body || {};
+  const pagination = normalizeAnomalyPagination(body.pagination);
+  state.anomalies.page = pagination.page;
+  state.anomalies.pageSize = pagination.pageSize;
   const rows = arrayValue(body.anomalies).map((item) => {
     const ids = arrayValue(item.sample_trace_ids);
     return [
@@ -1601,7 +1675,14 @@ function renderAnomalies(body) {
       item.display_reason || item.reason,
     ];
   });
-  renderShell(page("异常", `<section class="panel">${table(["Trace", "ID", "时间 (UTC+8)", "Severity", "类型", "员工", "观测值", "原因"], rows)}</section>`));
+  renderShell(
+    page(
+      "异常",
+      `${anomalyFiltersHTML()}<section class="panel">${table(["Trace", "ID", "时间 (UTC+8)", "Severity", "类型", "员工", "观测值", "原因"], rows)}${anomalyPaginationHTML(pagination)}</section>`,
+    ),
+  );
+  bindAnomalySearch();
+  bindAnomalyPagination();
   document.querySelectorAll("[data-trace-id]").forEach((button) => {
     button.addEventListener("click", async () => {
       try {
