@@ -1257,6 +1257,61 @@ function bindTracePagination() {
   });
 }
 
+function traceFiltersHTML() {
+  return `
+    <section class="panel">
+      <form class="filters" id="trace-filters" autocomplete="off">
+        <div class="field">
+          <label for="trace-filter-username">员工 (前缀)</label>
+          <input type="text" id="trace-filter-username" name="username" value="${escapeHTML(state.traces.username)}" placeholder="例如 E1001">
+        </div>
+        <div class="field">
+          <label for="trace-filter-trace-id">Trace ID</label>
+          <input type="text" id="trace-filter-trace-id" name="trace_id" value="${escapeHTML(state.traces.traceId)}" placeholder="精确匹配">
+        </div>
+        <div class="field">
+          <label for="trace-filter-token">Token 指纹</label>
+          <input type="text" id="trace-filter-token" name="token_fingerprint" value="${escapeHTML(state.traces.tokenFingerprint)}" placeholder="精确匹配">
+        </div>
+        <div class="field">
+          <label class="checkbox">
+            <input type="checkbox" id="trace-filter-needs-review" name="needs_review" value="1" ${state.traces.needsReview ? "checked" : ""}>
+            仅看待复核
+          </label>
+        </div>
+        <div class="field">
+          <button type="submit" class="primary">搜索</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+// applyTraceSearch 把过滤栏当前 DOM 值写回 state.traces（生效过滤）并重置到第 1 页。
+// 与「生效过滤不变」约束配合：翻页/跳页不改这里读写的字段，只改 page。
+function applyTraceSearch() {
+  const username = document.querySelector("#trace-filter-username");
+  const traceId = document.querySelector("#trace-filter-trace-id");
+  const token = document.querySelector("#trace-filter-token");
+  const needsReview = document.querySelector("#trace-filter-needs-review");
+  state.traces.username = username ? username.value.trim() : "";
+  state.traces.traceId = traceId ? traceId.value.trim() : "";
+  state.traces.tokenFingerprint = token ? token.value.trim() : "";
+  state.traces.needsReview = needsReview ? needsReview.checked : false;
+  state.traces.page = 1;
+}
+
+function bindTraceSearch() {
+  const form = document.querySelector("#trace-filters");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    applyTraceSearch();
+    renderShell(`<section class="loading-panel">正在加载Trace...</section>`);
+    await loadView();
+  });
+}
+
 function renderTraces(body) {
   body = body || {};
   const pagination = normalizeTracePagination(body.pagination);
@@ -1277,9 +1332,10 @@ function renderTraces(body) {
   renderShell(
     page(
       "Trace",
-      `<section class="panel">${table(["Trace", "时间 (UTC+8)", "员工", "Model", "Route", "Status", "Input", "Output", "Cached", "Total"], rows)}${tracePaginationHTML(pagination)}</section>`,
+      `${traceFiltersHTML()}<section class="panel">${table(["Trace", "时间 (UTC+8)", "员工", "Model", "Route", "Status", "Input", "Output", "Cached", "Total"], rows)}${tracePaginationHTML(pagination)}</section>`,
     ),
   );
+  bindTraceSearch();
   bindTracePagination();
   document.querySelectorAll("[data-trace-id]").forEach((button) => {
     button.addEventListener("click", async () => {

@@ -76,3 +76,38 @@ test("loadTraces includes active filters in the query string and omits empties",
   assert.doesNotMatch(calls[0], /trace_id=/);
   assert.doesNotMatch(calls[0], /token_fingerprint=/);
 });
+
+test("renderTraces emits a filter bar whose inputs are prefilled from active filters", () => {
+  const { app, fakeApp } = loadAppModule();
+  app.state.view = "traces";
+  app.state.traces.username = "roy";
+  app.state.traces.tokenFingerprint = "tkfp_abc";
+  app.state.traces.needsReview = true;
+
+  app.renderTraces({ traces: [], pagination: { page: 1, page_size: 50, total_items: 90, total_pages: 2, has_prev: false, has_next: true } });
+
+  assert.match(fakeApp.innerHTML, /id="trace-filters"/);
+  assert.match(fakeApp.innerHTML, /id="trace-filter-username"[^>]*value="roy"/);
+  assert.match(fakeApp.innerHTML, /id="trace-filter-token"[^>]*value="tkfp_abc"/);
+  assert.match(fakeApp.innerHTML, /id="trace-filter-needs-review"[^>]*checked/);
+});
+
+test("applyTraceSearch reads filter inputs into state and resets page to 1", () => {
+  const fakes = {
+    "#trace-filter-username": { value: " roy " },
+    "#trace-filter-trace-id": { value: " trace_9 " },
+    "#trace-filter-token": { value: "" },
+    "#trace-filter-needs-review": { checked: true },
+  };
+  const { app } = loadAppModule({ querySelector: (sel) => fakes[sel] });
+  app.state.traces.page = 5;
+  app.state.traces.username = "stale";
+
+  app.applyTraceSearch();
+
+  assert.equal(app.state.traces.username, "roy");
+  assert.equal(app.state.traces.traceId, "trace_9");
+  assert.equal(app.state.traces.tokenFingerprint, "");
+  assert.equal(app.state.traces.needsReview, true);
+  assert.equal(app.state.traces.page, 1);
+});
