@@ -699,3 +699,59 @@ def test_extract_user_intent_truncates_long_single_message():
     intent = extract_user_intent(msgs, max_chars=2000)
     assert intent.text.endswith("chars omitted]")
     assert len(intent.text) < len(long_text)
+
+
+def test_adapt_llm_result_carries_task_domain_and_reason():
+    from work_relevance import _adapt_llm_result
+
+    adapted = _adapt_llm_result({
+        "decision": "non_work_related",
+        "recommended_action": "alert_non_work",
+        "task_category": "web_development",
+        "task_domain": "manufacturing",
+        "confidence": 0.9,
+        "reason": "Task serves an unrelated industry.",
+    })
+    assert adapted["decision"] == "non_work_related"
+    assert adapted["recommended_action"] == "alert_non_work"
+    assert adapted["task_domain"] == "manufacturing"
+    assert adapted["reason"] == "Task serves an unrelated industry."
+
+
+def test_adapt_llm_result_defaults_task_domain_and_reason_to_empty():
+    from work_relevance import _adapt_llm_result
+
+    adapted = _adapt_llm_result({
+        "decision": "work_related",
+        "recommended_action": "allow",
+        "confidence": 0.8,
+    })
+    assert adapted["task_domain"] == ""
+    assert adapted["reason"] == ""
+
+
+def test_off_domain_llm_verdict_maps_to_alert_with_task_domain_evidence():
+    judge = StubJudge({
+        "decision": "non_work_related",
+        "recommended_action": "alert_non_work",
+        "task_category": "web_development",
+        "task_domain": "manufacturing",
+        "confidence": 0.9,
+        "reason": "Task serves an unrelated industry.",
+    })
+
+    assessment = classify_work_relevance(
+        job(usage_total_tokens=25000),
+        [message("Redesign the production line OEM inquiry page for a factory.")],
+        [],
+        llm_judge=judge,
+    )
+
+    assert assessment.decision == "non_work_related"
+    assert assessment.recommended_action == "alert_non_work"
+    llm_evidence = [
+        e for e in assessment.evidence
+        if isinstance(e, dict) and e.get("source") == "llm_judge"
+    ]
+    assert llm_evidence and llm_evidence[0]["task_domain"] == "manufacturing"
+    assert "unrelated industry" in llm_evidence[0]["reason"]
