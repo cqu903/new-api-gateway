@@ -9,12 +9,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 	"github.com/your-company/new-api-gateway/internal/evidence"
 	"github.com/your-company/new-api-gateway/internal/fingerprint"
@@ -1282,6 +1284,7 @@ func TestListAnomaliesIncludesDisplayReason(t *testing.T) {
 			ThresholdValue:     "40000",
 			Reason:             "raw high trace token reason",
 			CreatedAt:          "2026-04-28 10:00:00+00",
+			SampleTraceIDs:     []string{"trace_123"},
 		},
 	}
 
@@ -1308,6 +1311,9 @@ func TestListAnomaliesIncludesDisplayReason(t *testing.T) {
 	}
 	if got := body.Anomalies[0]["reason"]; got != "raw high trace token reason" {
 		t.Fatalf("reason = %#v", got)
+	}
+	if got := body.Anomalies[0]["sample_trace_ids"]; !reflect.DeepEqual(got, []any{"trace_123"}) {
+		t.Fatalf("sample_trace_ids = %#v, want [trace_123]", got)
 	}
 }
 
@@ -2199,6 +2205,9 @@ func (m *memoryAdminDB) Query(ctx context.Context, sql string, args ...any) (pgx
 				*(dest[7].(*string)) = item.ThresholdValue
 				*(dest[8].(*string)) = item.Reason
 				*(dest[9].(*string)) = item.CreatedAt
+				if len(dest) > 10 {
+					*(dest[10].(*pgtype.FlatArray[string])) = pgtype.FlatArray[string](item.SampleTraceIDs)
+				}
 				return nil
 			})
 		}

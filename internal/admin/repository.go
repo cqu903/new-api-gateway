@@ -350,7 +350,7 @@ func (r Repository) ListAnomalies(ctx context.Context, limit int) ([]AnomalySumm
 	}
 	rows, err := r.db.Query(ctx, `
 SELECT anomaly_id, anomaly_type, severity, status, username, fingerprint_display,
-       observed_value::text, threshold_value::text, reason, created_at::text
+       observed_value::text, threshold_value::text, reason, created_at::text, sample_trace_ids
 FROM usage_anomalies
 ORDER BY created_at DESC
 LIMIT $1`, limit)
@@ -365,6 +365,7 @@ LIMIT $1`, limit)
 			&item.AnomalyID, &item.AnomalyType, &item.Severity, &item.Status,
 			&item.Username, &item.FingerprintDisplay, &item.ObservedValue,
 			&item.ThresholdValue, &item.Reason, &item.CreatedAt,
+			(*pgtype.FlatArray[string])(&item.SampleTraceIDs),
 		); err != nil {
 			return nil, err
 		}

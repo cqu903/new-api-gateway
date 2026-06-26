@@ -120,17 +120,18 @@ type TraceSummary struct {
 }
 
 type AnomalySummary struct {
-	AnomalyID          string `json:"anomaly_id"`
-	AnomalyType        string `json:"anomaly_type"`
-	Severity           string `json:"severity"`
-	Status             string `json:"status"`
-	Username           string `json:"username"`
-	FingerprintDisplay string `json:"fingerprint_display"`
-	ObservedValue      string `json:"observed_value"`
-	ThresholdValue     string `json:"threshold_value"`
-	Reason             string `json:"reason"`
-	DisplayReason      string `json:"display_reason"`
-	CreatedAt          string `json:"created_at"`
+	AnomalyID          string   `json:"anomaly_id"`
+	AnomalyType        string   `json:"anomaly_type"`
+	Severity           string   `json:"severity"`
+	Status             string   `json:"status"`
+	Username           string   `json:"username"`
+	FingerprintDisplay string   `json:"fingerprint_display"`
+	ObservedValue      string   `json:"observed_value"`
+	ThresholdValue     string   `json:"threshold_value"`
+	Reason             string   `json:"reason"`
+	DisplayReason      string   `json:"display_reason"`
+	CreatedAt          string   `json:"created_at"`
+	SampleTraceIDs     []string `json:"sample_trace_ids"`
 }
 
 type CoverageAlertSummary struct {
