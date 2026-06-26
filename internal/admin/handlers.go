@@ -591,13 +591,24 @@ func (h Handler) listAuditLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) listAnomalies(w http.ResponseWriter, r *http.Request) {
-	items, err := h.repo.ListAnomalies(r.Context(), 100)
+	page := 1
+	if rawPage := strings.TrimSpace(r.URL.Query().Get("page")); rawPage != "" {
+		if parsed, err := strconv.Atoi(rawPage); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	filter := AnomalyFilter{
+		AnomalyType: strings.TrimSpace(r.URL.Query().Get("anomaly_type")),
+		Page:        page,
+		Limit:       50,
+	}
+	result, err := h.repo.ListAnomalies(r.Context(), filter)
 	if err != nil {
 		http.Error(w, "failed to list anomalies", http.StatusInternalServerError)
 		return
 	}
-	items = withAnomalyDisplayReasons(items)
-	writeJSON(w, http.StatusOK, map[string]any{"anomalies": items})
+	result.Anomalies = withAnomalyDisplayReasons(result.Anomalies)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func withAnomalyDisplayReasons(items []AnomalySummary) []AnomalySummary {

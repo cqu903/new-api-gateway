@@ -1270,6 +1270,64 @@ func TestTraceDetailIncludesAnalysisResultOriginMetadata(t *testing.T) {
 	}
 }
 
+func TestListAnomaliesReturnsTopLevelPagination(t *testing.T) {
+	handler, db, cookie := newAuthenticatedAdminHandler(t, RoleAuditor, "", nil)
+	db.anomalies = makeAnomalySummaries(60)
+	db.anomalyTotalItems = 120
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/anomalies?page=2", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body AnomalyListResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v; raw=%s", err, rec.Body.String())
+	}
+	if body.Pagination.Page != 2 || body.Pagination.PageSize != 50 {
+		t.Fatalf("pagination page = %#v", body.Pagination)
+	}
+	if body.Pagination.TotalItems != 120 || body.Pagination.TotalPages != 3 {
+		t.Fatalf("pagination totals = %#v", body.Pagination)
+	}
+	if !body.Pagination.HasPrev || !body.Pagination.HasNext {
+		t.Fatalf("pagination nav flags = %#v", body.Pagination)
+	}
+}
+
+func TestListAnomaliesFiltersByType(t *testing.T) {
+	handler, db, cookie := newAuthenticatedAdminHandler(t, RoleAuditor, "", nil)
+	db.anomalies = []AnomalySummary{
+		{AnomalyID: "anom_a", AnomalyType: "non_work_use", Severity: "high", Status: "open", CreatedAt: "2026-06-03 10:00:00+00"},
+		{AnomalyID: "anom_b", AnomalyType: "high_trace_tokens", Severity: "medium", Status: "open", CreatedAt: "2026-06-03 09:00:00+00"},
+	}
+	db.anomalyTotalItems = 1
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/anomalies?page=1&anomaly_type=non_work_use", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body AnomalyListResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v; raw=%s", err, rec.Body.String())
+	}
+	if len(body.Anomalies) != 1 || body.Anomalies[0].AnomalyID != "anom_a" {
+		t.Fatalf("anomalies = %#v, want only anom_a (non_work_use)", body.Anomalies)
+	}
+	if body.Pagination.TotalItems != 1 {
+		t.Fatalf("total items = %d, want 1", body.Pagination.TotalItems)
+	}
+}
+
 func TestListAnomaliesIncludesDisplayReason(t *testing.T) {
 	handler, db, cookie := newAuthenticatedAdminHandler(t, RoleViewer, "", nil)
 	db.anomalies = []AnomalySummary{
@@ -1287,6 +1345,7 @@ func TestListAnomaliesIncludesDisplayReason(t *testing.T) {
 			SampleTraceIDs:     []string{"trace_123"},
 		},
 	}
+	db.anomalyTotalItems = 1
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/api/anomalies", nil)
 	req.AddCookie(cookie)
@@ -1297,22 +1356,20 @@ func TestListAnomaliesIncludesDisplayReason(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
 	}
-	var body struct {
-		Anomalies []map[string]any `json:"anomalies"`
-	}
+	var body AnomalyListResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode anomalies body: %v", err)
 	}
 	if len(body.Anomalies) != 1 {
 		t.Fatalf("anomalies = %#v, want one item", body.Anomalies)
 	}
-	if got := body.Anomalies[0]["display_reason"]; got != "本次请求有效 token 消耗 48,200，超过阈值 40,000。" {
+	if got := body.Anomalies[0].DisplayReason; got != "本次请求有效 token 消耗 48,200，超过阈值 40,000。" {
 		t.Fatalf("display_reason = %#v", got)
 	}
-	if got := body.Anomalies[0]["reason"]; got != "raw high trace token reason" {
+	if got := body.Anomalies[0].Reason; got != "raw high trace token reason" {
 		t.Fatalf("reason = %#v", got)
 	}
-	if got := body.Anomalies[0]["sample_trace_ids"]; !reflect.DeepEqual(got, []any{"trace_123"}) {
+	if got := body.Anomalies[0].SampleTraceIDs; !reflect.DeepEqual(got, []string{"trace_123"}) {
 		t.Fatalf("sample_trace_ids = %#v, want [trace_123]", got)
 	}
 }
@@ -1990,6 +2047,7 @@ type memoryAdminDB struct {
 	traceList                    []TraceSummary
 	traceTotalItems              int64
 	anomalies                    []AnomalySummary
+	anomalyTotalItems            int64
 	traceAnomalies               []AnomalySummary
 	employeeUsageFilter          EmployeeUsageFilter
 	employeeUsageCalled          bool
@@ -2190,6 +2248,40 @@ func (m *memoryAdminDB) Query(ctx context.Context, sql string, args ...any) (pgx
 		items := m.anomalies
 		if strings.Contains(sql, "WHERE $1 = ANY(sample_trace_ids)") {
 			items = m.traceAnomalies
+		} else {
+			if strings.Contains(sql, "anomaly_type =") {
+				typeVal := ""
+				for _, a := range args {
+					if s, ok := a.(string); ok && s != "" {
+						typeVal = s
+						break
+					}
+				}
+				filtered := make([]AnomalySummary, 0, len(items))
+				for _, it := range items {
+					if it.AnomalyType == typeVal {
+						filtered = append(filtered, it)
+					}
+				}
+				items = filtered
+			}
+			limit, offset := len(items), 0
+			if len(args) >= 2 {
+				if v, ok := args[len(args)-2].(int); ok {
+					limit = v
+				}
+				if v, ok := args[len(args)-1].(int); ok {
+					offset = v
+				}
+			}
+			if offset > len(items) {
+				offset = len(items)
+			}
+			end := offset + limit
+			if end > len(items) {
+				end = len(items)
+			}
+			items = items[offset:end]
 		}
 		scans := make([]func(dest ...any) error, 0, len(items))
 		for _, item := range items {
@@ -2334,6 +2426,10 @@ type memoryAdminRow struct {
 }
 
 func (r memoryAdminRow) Scan(dest ...any) error {
+	if strings.Contains(r.sql, "SELECT count(*)") && strings.Contains(r.sql, "FROM usage_anomalies") && !strings.Contains(r.sql, "token_fingerprint") {
+		*(dest[0].(*int64)) = r.db.anomalyTotalItems
+		return nil
+	}
 	if strings.Contains(r.sql, "FROM audit_users") {
 		if r.db.findUserErr != nil {
 			return r.db.findUserErr
@@ -2523,6 +2619,20 @@ func makeTraceSummaries(count int) []TraceSummary {
 		})
 	}
 	return items
+}
+
+func makeAnomalySummaries(count int) []AnomalySummary {
+	out := make([]AnomalySummary, count)
+	for i := range out {
+		out[i] = AnomalySummary{
+			AnomalyID:   fmt.Sprintf("anom_%03d", i+1),
+			AnomalyType: "high_trace_tokens",
+			Severity:    "high",
+			Status:      "open",
+			CreatedAt:   "2026-06-03 10:00:00+00",
+		}
+	}
+	return out
 }
 
 func rawRefValues() []string {
