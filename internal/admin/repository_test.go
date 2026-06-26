@@ -1737,6 +1737,12 @@ func TestRepositoryListTracesNeedsReviewOffOmitsExists(t *testing.T) {
 	repo := NewRepository(db)
 
 	_, _ = repo.ListTraces(context.Background(), TraceFilter{NeedsReview: false, Page: 1, Limit: 50})
+	// Only the count query (querySQLs[0]) is a clean signal here: the list query
+	// (querySQLs[1]) always carries `EXISTS(...) AS needs_review` in its SELECT
+	// list regardless of the NeedsReview filter, so it would always match. The
+	// count query has no SELECT-column EXISTS, so its absence proves the filter
+	// is off — and since count + list share traceFilterWhereArgs, the list
+	// WHERE clause is off too.
 	if strings.Contains(db.querySQLs[0], "EXISTS(SELECT 1 FROM analysis_results") {
 		t.Fatalf("count query unexpectedly includes EXISTS: %s", db.querySQLs[0])
 	}
