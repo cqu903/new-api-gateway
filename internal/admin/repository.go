@@ -330,7 +330,7 @@ func (r Repository) ListTraces(ctx context.Context, filter TraceFilter) (TraceLi
 
 	return TraceListResult{
 		Traces: traces,
-		Pagination: TracePagination{
+		Pagination: Pagination{
 			Page:       page,
 			PageSize:   limit,
 			TotalItems: totalItems,
@@ -341,21 +341,52 @@ func (r Repository) ListTraces(ctx context.Context, filter TraceFilter) (TraceLi
 	}, nil
 }
 
-func (r Repository) ListAnomalies(ctx context.Context, limit int) ([]AnomalySummary, error) {
+func anomalyFilterWhereArgs(filter AnomalyFilter) ([]string, []any) {
+	where := []string{"1=1"}
+	args := []any{}
+	if filter.AnomalyType != "" {
+		args = append(args, filter.AnomalyType)
+		where = append(where, fmt.Sprintf("anomaly_type = $%d", len(args)))
+	}
+	return where, args
+}
+
+func (r Repository) ListAnomalies(ctx context.Context, filter AnomalyFilter) (AnomalyListResult, error) {
 	if r.db == nil {
-		return nil, ErrAdminDBRequired
+		return AnomalyListResult{}, ErrAdminDBRequired
 	}
-	if limit <= 0 || limit > 100 {
-		limit = 100
+	page := normalizeTraceListPage(filter.Page)
+	limit := normalizeTraceListLimit(filter.Limit)
+	where, args := anomalyFilterWhereArgs(filter)
+
+	var totalItems int64
+	countQuery := fmt.Sprintf(`SELECT count(*) FROM usage_anomalies WHERE %s`, strings.Join(where, " AND "))
+	if err := r.db.QueryRow(ctx, countQuery, args...).Scan(&totalItems); err != nil {
+		return AnomalyListResult{}, err
 	}
-	rows, err := r.db.Query(ctx, `
+
+	totalPages := 0
+	if totalItems > 0 {
+		totalPages = int((totalItems + int64(limit) - 1) / int64(limit))
+		if page > totalPages {
+			page = totalPages
+		}
+	} else {
+		page = 1
+	}
+
+	offset := (page - 1) * limit
+	listArgs := append(append([]any(nil), args...), limit, offset)
+	query := fmt.Sprintf(`
 SELECT anomaly_id, anomaly_type, severity, status, username, fingerprint_display,
        observed_value::text, threshold_value::text, reason, created_at::text, sample_trace_ids
 FROM usage_anomalies
+WHERE %s
 ORDER BY created_at DESC
-LIMIT $1`, limit)
+LIMIT $%d OFFSET $%d`, strings.Join(where, " AND "), len(args)+1, len(args)+2)
+	rows, err := r.db.Query(ctx, query, listArgs...)
 	if err != nil {
-		return nil, err
+		return AnomalyListResult{}, err
 	}
 	defer rows.Close()
 	var items []AnomalySummary
@@ -367,11 +398,24 @@ LIMIT $1`, limit)
 			&item.ThresholdValue, &item.Reason, &item.CreatedAt,
 			(*pgtype.FlatArray[string])(&item.SampleTraceIDs),
 		); err != nil {
-			return nil, err
+			return AnomalyListResult{}, err
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return AnomalyListResult{}, err
+	}
+	return AnomalyListResult{
+		Anomalies: items,
+		Pagination: Pagination{
+			Page:       page,
+			PageSize:   limit,
+			TotalItems: totalItems,
+			TotalPages: totalPages,
+			HasPrev:    totalPages > 0 && page > 1,
+			HasNext:    totalPages > 0 && page < totalPages,
+		},
+	}, nil
 }
 
 func (r Repository) ListCoverageAlerts(ctx context.Context, limit int) ([]CoverageAlertSummary, error) {

@@ -1747,3 +1747,147 @@ func TestRepositoryListTracesNeedsReviewOffOmitsExists(t *testing.T) {
 		t.Fatalf("count query unexpectedly includes EXISTS: %s", db.querySQLs[0])
 	}
 }
+
+func TestRepositoryListAnomaliesReturnsPaginationMetadata(t *testing.T) {
+	db := &recordingAdminDB{
+		rowQueue: []pgx.Row{
+			scanFuncRow{scan: func(dest ...any) error {
+				*(dest[0].(*int64)) = int64(120)
+				return nil
+			}},
+		},
+		rowsQueue: []pgx.Rows{
+			&scanRows{scans: []func(dest ...any) error{
+				func(dest ...any) error {
+					*(dest[0].(*string)) = "anom_120"
+					*(dest[1].(*string)) = "high_trace_tokens"
+					*(dest[2].(*string)) = "high"
+					*(dest[3].(*string)) = "open"
+					*(dest[4].(*string)) = "E10001"
+					*(dest[5].(*string)) = "fp_abcd"
+					*(dest[6].(*string)) = "48200"
+					*(dest[7].(*string)) = "40000"
+					*(dest[8].(*string)) = "raw reason"
+					*(dest[9].(*string)) = "2026-06-03 10:00:00+00"
+					*(dest[10].(*pgtype.FlatArray[string])) = pgtype.FlatArray[string]{}
+					return nil
+				},
+			}},
+		},
+	}
+	repo := NewRepository(db)
+
+	result, err := repo.ListAnomalies(context.Background(), AnomalyFilter{Page: 3, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListAnomalies error: %v", err)
+	}
+	if len(result.Anomalies) != 1 || result.Anomalies[0].AnomalyID != "anom_120" {
+		t.Fatalf("anomaly rows = %#v", result.Anomalies)
+	}
+	if result.Pagination.Page != 3 || result.Pagination.PageSize != 50 {
+		t.Fatalf("pagination page = %#v", result.Pagination)
+	}
+	if result.Pagination.TotalItems != 120 || result.Pagination.TotalPages != 3 {
+		t.Fatalf("pagination totals = %#v", result.Pagination)
+	}
+	if !result.Pagination.HasPrev || result.Pagination.HasNext {
+		t.Fatalf("pagination nav flags = %#v", result.Pagination)
+	}
+	if len(db.querySQLs) != 2 {
+		t.Fatalf("querySQLs = %#v, want count + list queries", db.querySQLs)
+	}
+	if !strings.Contains(db.querySQLs[0], "SELECT count(*)") || !strings.Contains(db.querySQLs[0], "FROM usage_anomalies") {
+		t.Fatalf("count query = %s", db.querySQLs[0])
+	}
+	if !strings.Contains(db.querySQLs[1], "ORDER BY created_at DESC") {
+		t.Fatalf("list query = %s", db.querySQLs[1])
+	}
+	if got := db.queryArgsLog[1]; len(got) != 2 || got[0] != 50 || got[1] != 100 {
+		t.Fatalf("list query args = %#v, want [50 100] (limit,offset)", got)
+	}
+}
+
+func TestRepositoryListAnomaliesClampsPageToLastPage(t *testing.T) {
+	db := &recordingAdminDB{
+		rowQueue: []pgx.Row{
+			scanFuncRow{scan: func(dest ...any) error {
+				*(dest[0].(*int64)) = int64(60)
+				return nil
+			}},
+		},
+		rowsQueue: []pgx.Rows{&fakeRows{}},
+	}
+	repo := NewRepository(db)
+
+	result, err := repo.ListAnomalies(context.Background(), AnomalyFilter{Page: 99, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListAnomalies error: %v", err)
+	}
+	if result.Pagination.Page != 2 || result.Pagination.TotalPages != 2 {
+		t.Fatalf("pagination = %#v, want last page 2/2", result.Pagination)
+	}
+	if got := db.queryArgsLog[1]; len(got) != 2 || got[0] != 50 || got[1] != 50 {
+		t.Fatalf("list query args = %#v, want [50 50]", got)
+	}
+}
+
+func TestRepositoryListAnomaliesReturnsFirstPageForEmptyResults(t *testing.T) {
+	db := &recordingAdminDB{
+		rowQueue: []pgx.Row{
+			scanFuncRow{scan: func(dest ...any) error {
+				*(dest[0].(*int64)) = int64(0)
+				return nil
+			}},
+		},
+		rowsQueue: []pgx.Rows{&fakeRows{}},
+	}
+	repo := NewRepository(db)
+
+	result, err := repo.ListAnomalies(context.Background(), AnomalyFilter{Page: 9, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListAnomalies error: %v", err)
+	}
+	if result.Pagination.Page != 1 || result.Pagination.TotalPages != 0 || result.Pagination.TotalItems != 0 {
+		t.Fatalf("pagination = %#v, want empty result page 1 with zero totals", result.Pagination)
+	}
+}
+
+func TestRepositoryListAnomaliesBindsTypeFilter(t *testing.T) {
+	db := &recordingAdminDB{
+		rowQueue: []pgx.Row{
+			scanFuncRow{scan: func(dest ...any) error {
+				*(dest[0].(*int64)) = int64(7)
+				return nil
+			}},
+		},
+		rowsQueue: []pgx.Rows{&fakeRows{}},
+	}
+	repo := NewRepository(db)
+
+	if _, err := repo.ListAnomalies(context.Background(), AnomalyFilter{AnomalyType: "non_work_use", Page: 1, Limit: 50}); err != nil {
+		t.Fatalf("ListAnomalies error: %v", err)
+	}
+	if len(db.querySQLs) != 2 {
+		t.Fatalf("querySQLs = %#v", db.querySQLs)
+	}
+	if !strings.Contains(db.querySQLs[0], "anomaly_type = $1") {
+		t.Fatalf("count query should filter anomaly_type, got %s", db.querySQLs[0])
+	}
+	if !strings.Contains(db.querySQLs[1], "anomaly_type = $1") {
+		t.Fatalf("list query should filter anomaly_type, got %s", db.querySQLs[1])
+	}
+	// count 查询的 args：[typeValue]；list 查询的 args：[typeValue, limit, offset]
+	if got := db.queryArgsLog[0]; len(got) != 1 || got[0] != "non_work_use" {
+		t.Fatalf("count args = %#v, want [non_work_use]", got)
+	}
+	if got := db.queryArgsLog[1]; len(got) != 3 || got[0] != "non_work_use" || got[1] != 50 || got[2] != 0 {
+		t.Fatalf("list args = %#v, want [non_work_use 50 0]", got)
+	}
+}
+
+func TestRepositoryListAnomaliesRequiresDB(t *testing.T) {
+	repo := NewRepository(nil)
+	if _, err := repo.ListAnomalies(context.Background(), AnomalyFilter{Page: 1, Limit: 50}); !errors.Is(err, ErrAdminDBRequired) {
+		t.Fatalf("err = %v, want ErrAdminDBRequired", err)
+	}
+}

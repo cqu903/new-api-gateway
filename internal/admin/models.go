@@ -87,7 +87,7 @@ type TraceFilter struct {
 	Limit            int
 }
 
-type TracePagination struct {
+type Pagination struct {
 	Page       int   `json:"page"`
 	PageSize   int   `json:"page_size"`
 	TotalItems int64 `json:"total_items"`
@@ -97,8 +97,19 @@ type TracePagination struct {
 }
 
 type TraceListResult struct {
-	Traces     []TraceSummary  `json:"traces"`
-	Pagination TracePagination `json:"pagination"`
+	Traces     []TraceSummary `json:"traces"`
+	Pagination Pagination     `json:"pagination"`
+}
+
+type AnomalyFilter struct {
+	AnomalyType string
+	Page        int
+	Limit       int
+}
+
+type AnomalyListResult struct {
+	Anomalies  []AnomalySummary `json:"anomalies"`
+	Pagination Pagination       `json:"pagination"`
 }
 
 type TraceSummary struct {
