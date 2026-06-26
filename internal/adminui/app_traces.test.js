@@ -31,7 +31,13 @@ function loadAppModule(overrides = {}) {
         if (selector === ".main") return fakeElement;
         return null;
       },
-      querySelectorAll() { return []; },
+      querySelectorAll(selector) {
+        if (typeof overrides.querySelectorAll === "function") {
+          const r = overrides.querySelectorAll(selector);
+          if (r !== undefined) return r;
+        }
+        return [];
+      },
     },
     window: { innerHeight: 900, innerWidth: 1440, UsagePage: { renderUsagePage: () => "" }, AdminAnalysisResultCards: { renderAnalysisResultCards: () => "" }, Chart: overrides.Chart || function Chart() {} },
     fetch: overrides.fetch || (async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" })),
@@ -166,4 +172,38 @@ test("renderTraceDetail back button returns to the provided view and defaults to
   assert.equal(typeof backHandler, "function");
   await backHandler();
   assert.equal(app.state.view, "traces");
+});
+
+test("renderAnomalies shows a trace link when sample_trace_ids is non-empty and omits it when empty", () => {
+  const { app, fakeApp } = loadAppModule();
+  app.renderAnomalies({ anomalies: [{ anomaly_id: "anom_1", sample_trace_ids: ["trace_123"], severity: "high", anomaly_type: "high_trace_tokens", created_at: "2026-04-28T10:00:00Z", observed_value: "48200", display_reason: "x" }] });
+  assert.match(fakeApp.innerHTML, /data-trace-id="trace_123"/);
+
+  app.renderAnomalies({ anomalies: [{ anomaly_id: "anom_2", sample_trace_ids: [], severity: "medium", anomaly_type: "off_hours_high_usage", created_at: "2026-04-28T11:00:00Z", observed_value: "22500", display_reason: "y" }] });
+  assert.doesNotMatch(fakeApp.innerHTML, /data-trace-id=/);
+});
+
+test("clicking an anomaly trace button opens the corresponding trace detail", async () => {
+  const fetchCalls = [];
+  let traceClickHandler;
+  const traceBtn = { dataset: { traceId: "trace_123" }, addEventListener(evt, cb) { traceClickHandler = cb; } };
+  const backBtn = { addEventListener() {}, removeEventListener() {}, getAttribute() { return ""; }, matches() { return false; }, closest() { return null; }, style: {}, textContent: "" };
+  const { app, fakeApp } = loadAppModule({
+    querySelector: (sel) => (sel === "#back-to-traces" ? backBtn : undefined),
+    querySelectorAll: (sel) => (sel === "[data-trace-id]" ? [traceBtn] : []),
+    fetch: async (url) => {
+      fetchCalls.push(url);
+      if (url.includes("/traces/trace_123")) {
+        return { ok: true, status: 200, json: async () => ({ trace: { trace_id: "trace_123" } }), text: async () => "" };
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+    },
+  });
+  app.state.view = "anomalies";
+  app.renderAnomalies({ anomalies: [{ anomaly_id: "anom_1", sample_trace_ids: ["trace_123"], severity: "high", anomaly_type: "high_trace_tokens", created_at: "2026-04-28T10:00:00Z", observed_value: "48200", display_reason: "x" }] });
+
+  assert.equal(typeof traceClickHandler, "function");
+  await traceClickHandler();
+  assert.ok(fetchCalls.some((u) => u.includes("/admin/api/traces/trace_123")));
+  assert.match(fakeApp.innerHTML, /Trace 详情/);
 });
