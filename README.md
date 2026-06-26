@@ -223,6 +223,7 @@ NEW_API_POSTGRES_DSN=postgres://root:123456@192.168.1.100:5432/new-api?sslmode=d
 | `LLM_JUDGE_MODEL` | vLLM 暴露的模型名 |
 | `LLM_JUDGE_API_KEY` | 可选 API key |
 | `LLM_JUDGE_TIMEOUT_SECONDS` | 可选超时时间，默认 20 秒 |
+- `ORG_BUSINESS_DOMAIN`：组织主业（如 `金融服务`）；设置后 LLM judge 会把"明确服务于其他行业"的 trace 判为 `non_work_related`（high 级 `non_work_use` 异常），内部职能仍算合法工作。未设置则保持通用判定。
 
 启用时至少需要同时设置 `LLM_JUDGE_BASE_URL` 和 `LLM_JUDGE_MODEL`。默认 Docker Compose 会把这些变量透传到 `analysis-worker` / `analysis-batch` 容器（`analysis-rollup` 不需要 LLM judge，不透传），因此在容器部署里只需要把值写进 `--env-file` 指定的 env 文件（例如 `.env.local`）即可；手动运行 Python worker 时同样直接读取这些环境变量。
 
