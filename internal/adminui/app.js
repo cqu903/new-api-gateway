@@ -39,6 +39,11 @@ const state = {
     tokenFingerprint: "",
     needsReview: false,
   },
+  anomalies: {
+    page: 1,
+    pageSize: 50,
+    anomalyType: "",
+  },
   analysisRuntime: {
     stage: "core",
     range: "1h",
@@ -52,6 +57,7 @@ const state = {
 let usageRequestSeq = 0;
 let usageSearchSeq = 0;
 let traceRequestSeq = 0;
+let anomalyRequestSeq = 0;
 let runtimeSamplingSummarySeq = 0;
 
 const activeCharts = [];
@@ -1344,6 +1350,118 @@ function bindTraceSearch() {
     renderShell(`<section class="loading-panel">正在加载Trace...</section>`);
     await loadView();
   });
+}
+
+const ANOMALY_TYPE_FILTERS = [
+  { value: "", label: "全部" },
+  { value: "high_trace_tokens", label: "高 token 用量" },
+  { value: "long_output_anomaly", label: "超长输出" },
+  { value: "off_hours_high_usage", label: "非工作时间高用量" },
+  { value: "non_work_use", label: "非工作用途" },
+  { value: "multivariate_anomaly", label: "多变量异常" },
+];
+
+function normalizeAnomalyPagination(pagination) {
+  const normalized = pagination || {};
+  const fallbackPage = Math.max(1, finiteNumber(state.anomalies.page) || 1);
+  const fallbackPageSize = Math.max(1, finiteNumber(state.anomalies.pageSize) || 50);
+  return {
+    page: Math.max(1, finiteNumber(normalized.page) || fallbackPage),
+    pageSize: Math.max(1, finiteNumber(normalized.page_size) || fallbackPageSize),
+    totalItems: Math.max(0, finiteNumber(normalized.total_items)),
+    totalPages: Math.max(0, finiteNumber(normalized.total_pages)),
+    hasPrev: Boolean(normalized.has_prev),
+    hasNext: Boolean(normalized.has_next),
+  };
+}
+
+function anomalyPageNumbers(pagination) {
+  const total = pagination.totalPages;
+  const current = pagination.page;
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, index) => index + 1);
+  }
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  if (current <= 3) {
+    pages.add(2);
+    pages.add(3);
+    pages.add(4);
+  }
+  if (current >= total - 2) {
+    pages.add(total - 1);
+    pages.add(total - 2);
+    pages.add(total - 3);
+  }
+  return Array.from(pages)
+    .filter((page) => page >= 1 && page <= total)
+    .sort((a, b) => a - b);
+}
+
+// parseAnomalyJumpPage 把跳页输入解析为 [1, totalPages] 内的整数；非法/越界返回 null。
+function parseAnomalyJumpPage(raw, totalPages) {
+  const trimmed = String(raw ?? "").trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1 || n > totalPages) return null;
+  return n;
+}
+
+function anomalyPaginationHTML(pagination) {
+  if (pagination.totalItems === 0 || pagination.totalPages === 0) {
+    return `<div class="pagination-bar"><div class="pagination-summary">共 0 条</div></div>`;
+  }
+  const pages = anomalyPageNumbers(pagination);
+  const pageButtons = [];
+  let previous = 0;
+  pages.forEach((pageNumber) => {
+    if (previous && pageNumber - previous > 1) {
+      pageButtons.push(`<span class="pagination-ellipsis" aria-hidden="true">...</span>`);
+    }
+    pageButtons.push(
+      `<button type="button" data-anomaly-page="${pageNumber}" class="${pageNumber === pagination.page ? "active" : ""}" ${pageNumber === pagination.page ? 'aria-current="page"' : ""}>${pageNumber}</button>`,
+    );
+    previous = pageNumber;
+  });
+  return `
+    <div class="pagination-bar">
+      <div class="pagination-summary">第 ${formatNumber(pagination.page)} / ${formatNumber(pagination.totalPages)} 页，共 ${formatNumber(pagination.totalItems)} 条</div>
+      <div class="pagination-controls">
+        <button type="button" data-anomaly-page="1" ${pagination.hasPrev ? "" : "disabled"}>首页</button>
+        <button type="button" data-anomaly-page="${pagination.page - 1}" ${pagination.hasPrev ? "" : "disabled"}>上一页</button>
+        ${pageButtons.join("")}
+        <button type="button" data-anomaly-page="${pagination.page + 1}" ${pagination.hasNext ? "" : "disabled"}>下一页</button>
+        <button type="button" data-anomaly-page="${pagination.totalPages}" ${pagination.hasNext ? "" : "disabled"}>末页</button>
+        <span class="pagination-jump">跳至 <input type="number" id="anomaly-jump-page" min="1" max="${pagination.totalPages}" value="${pagination.page}"> 页 <button type="button" id="anomaly-jump-go">跳转</button></span>
+      </div>
+    </div>
+  `;
+}
+
+function anomalyFiltersHTML() {
+  const current = state.anomalies.anomalyType;
+  const options = ANOMALY_TYPE_FILTERS.map(
+    (entry) => `<option value="${escapeHTML(entry.value)}"${entry.value === current ? " selected" : ""}>${escapeHTML(entry.label)}</option>`,
+  ).join("");
+  return `
+    <section class="panel">
+      <form class="filters" id="anomaly-filters" autocomplete="off">
+        <div class="field">
+          <label for="anomaly-filter-type">类型</label>
+          <select id="anomaly-filter-type" name="anomaly_type">${options}</select>
+        </div>
+        <div class="field">
+          <button type="submit" class="primary">筛选</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+// applyAnomalyFilter 把过滤栏当前 DOM 值写回 state.anomalies（生效过滤）并重置到第 1 页。
+function applyAnomalyFilter() {
+  const select = document.querySelector("#anomaly-filter-type");
+  state.anomalies.anomalyType = select ? String(select.value).trim() : "";
+  state.anomalies.page = 1;
 }
 
 function renderTraces(body) {
