@@ -234,7 +234,7 @@ func traceFilterWhereArgs(filter TraceFilter) ([]string, []any) {
 		add("t.trace_id = $%d", filter.TraceID)
 	}
 	if filter.Username != "" {
-		add("t.username_snapshot = $%d", filter.Username)
+		add("t.username_snapshot ILIKE $%d ESCAPE '\\'", escapeILIKE(filter.Username)+"%")
 	}
 	if filter.TokenFingerprint != "" {
 		add("t.token_fingerprint = $%d", filter.TokenFingerprint)
@@ -247,6 +247,9 @@ func traceFilterWhereArgs(filter TraceFilter) ([]string, []any) {
 	}
 	if filter.StatusCode != 0 {
 		add("t.status_code = $%d", filter.StatusCode)
+	}
+	if filter.NeedsReview {
+		where = append(where, "EXISTS(SELECT 1 FROM analysis_results WHERE trace_id = t.trace_id AND severity = 'review')")
 	}
 	return where, args
 }

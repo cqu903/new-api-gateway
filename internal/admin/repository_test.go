@@ -439,7 +439,7 @@ func TestRepositoryListTracesBindsFiltersAndCapsLimit(t *testing.T) {
 		t.Fatalf("ListTraces error: %v", err)
 	}
 	if !strings.Contains(db.querySQLs[0], "t.trace_id = $1") ||
-		!strings.Contains(db.querySQLs[0], "t.username_snapshot = $2") ||
+		!strings.Contains(db.querySQLs[0], `t.username_snapshot ILIKE $2 ESCAPE '\'`) ||
 		!strings.Contains(db.querySQLs[0], "t.token_fingerprint = $3") ||
 		!strings.Contains(db.querySQLs[0], "t.route_pattern = $4") ||
 		!strings.Contains(db.querySQLs[0], "t.model_requested = $5") ||
@@ -449,8 +449,8 @@ func TestRepositoryListTracesBindsFiltersAndCapsLimit(t *testing.T) {
 	if strings.Contains(db.querySQLs[1], "500") {
 		t.Fatalf("list query interpolated raw limit: %s", db.querySQLs[1])
 	}
-	if got := db.queryArgsLog[0]; len(got) != 6 {
-		t.Fatalf("count query args = %#v, want 6 filters", got)
+	if got := db.queryArgsLog[0]; len(got) != 6 || got[1] != "E10001%" {
+		t.Fatalf("count query args = %#v, want 6 filters with username='E10001%%'", got)
 	}
 	if got := db.queryArgsLog[1]; len(got) != 8 || got[6] != 100 || got[7] != 0 {
 		t.Fatalf("list query args = %#v, want filters + [100 0]", got)
@@ -1653,5 +1653,91 @@ func TestEscapeILIKEEscapesMetacharacters(t *testing.T) {
 		if got := escapeILIKE(c.in); got != c.want {
 			t.Fatalf("escapeILIKE(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestRepositoryListTracesUsernameUsesILIKEPrefix(t *testing.T) {
+	db := &recordingAdminDB{
+		rowQueue: []pgx.Row{
+			scanFuncRow{scan: func(dest ...any) error { *(dest[0].(*int64)) = int64(0); return nil }},
+		},
+		rowsQueue: []pgx.Rows{&fakeRows{}},
+	}
+	repo := NewRepository(db)
+
+	_, err := repo.ListTraces(context.Background(), TraceFilter{Username: "roy", Page: 1, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListTraces error: %v", err)
+	}
+	// count 与 list 都应是 ILIKE 前缀
+	for i, sql := range db.querySQLs {
+		if !strings.Contains(sql, `username_snapshot ILIKE $1 ESCAPE '\'`) {
+			t.Fatalf("query[%d] missing ILIKE prefix: %s", i, sql)
+		}
+	}
+	if got := db.queryArgsLog[0]; len(got) != 1 || got[0] != "roy%" {
+		t.Fatalf("count username arg = %#v, want [roy%%]", got)
+	}
+	// list 参数 = [roy%, 50, 0]
+	if got := db.queryArgsLog[1]; len(got) != 3 || got[0] != "roy%" || got[1] != 50 || got[2] != 0 {
+		t.Fatalf("list args = %#v, want [roy%% 50 0]", got)
+	}
+}
+
+func TestRepositoryListTracesUsernameEscapesMetaChars(t *testing.T) {
+	db := &recordingAdminDB{
+		rowQueue: []pgx.Row{
+			scanFuncRow{scan: func(dest ...any) error { *(dest[0].(*int64)) = int64(0); return nil }},
+		},
+		rowsQueue: []pgx.Rows{&fakeRows{}},
+	}
+	repo := NewRepository(db)
+
+	_, _ = repo.ListTraces(context.Background(), TraceFilter{Username: "a_b%c", Page: 1, Limit: 50})
+	if got := db.queryArgsLog[0]; len(got) != 1 || got[0] != `a\_b\%c%` {
+		t.Fatalf("escaped username arg = %#v, want [a\\_b\\%%c + trailing %%]", got)
+	}
+}
+
+func TestRepositoryListTracesNeedsReviewAddsExistsToBothQueries(t *testing.T) {
+	db := &recordingAdminDB{
+		rowQueue: []pgx.Row{
+			scanFuncRow{scan: func(dest ...any) error { *(dest[0].(*int64)) = int64(0); return nil }},
+		},
+		rowsQueue: []pgx.Rows{&fakeRows{}},
+	}
+	repo := NewRepository(db)
+
+	_, err := repo.ListTraces(context.Background(), TraceFilter{NeedsReview: true, Page: 1, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListTraces error: %v", err)
+	}
+	const existsClause = "EXISTS(SELECT 1 FROM analysis_results WHERE trace_id = t.trace_id AND severity = 'review')"
+	for i, sql := range db.querySQLs {
+		if !strings.Contains(sql, existsClause) {
+			t.Fatalf("query[%d] missing needs_review EXISTS: %s", i, sql)
+		}
+	}
+	// EXISTS 不带位置参数 → count 参数为 0，list 参数 = [limit, offset]
+	if got := db.queryArgsLog[0]; len(got) != 0 {
+		t.Fatalf("count args = %#v, want 0 (EXISTS adds no positional arg)", got)
+	}
+	if got := db.queryArgsLog[1]; len(got) != 2 || got[0] != 50 || got[1] != 0 {
+		t.Fatalf("list args = %#v, want [50 0]", got)
+	}
+}
+
+func TestRepositoryListTracesNeedsReviewOffOmitsExists(t *testing.T) {
+	db := &recordingAdminDB{
+		rowQueue: []pgx.Row{
+			scanFuncRow{scan: func(dest ...any) error { *(dest[0].(*int64)) = int64(0); return nil }},
+		},
+		rowsQueue: []pgx.Rows{&fakeRows{}},
+	}
+	repo := NewRepository(db)
+
+	_, _ = repo.ListTraces(context.Background(), TraceFilter{NeedsReview: false, Page: 1, Limit: 50})
+	if strings.Contains(db.querySQLs[0], "EXISTS(SELECT 1 FROM analysis_results") {
+		t.Fatalf("count query unexpectedly includes EXISTS: %s", db.querySQLs[0])
 	}
 }

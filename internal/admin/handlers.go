@@ -345,6 +345,7 @@ func (h Handler) listTraces(w http.ResponseWriter, r *http.Request) {
 		TokenFingerprint: r.URL.Query().Get("token_fingerprint"),
 		RoutePattern:     r.URL.Query().Get("route_pattern"),
 		Model:            r.URL.Query().Get("model"),
+		NeedsReview:      parseBoolQueryParam(r.URL.Query().Get("needs_review")),
 		Page:             page,
 		Limit:            50,
 	}
