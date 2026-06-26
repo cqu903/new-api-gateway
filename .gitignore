@@ -1,6 +1,7 @@
 .superpowers/
 .worktrees/
-.claude/
+.claude/*
+!.claude/skills/
 .DS_Store
 __pycache__/
 var/
