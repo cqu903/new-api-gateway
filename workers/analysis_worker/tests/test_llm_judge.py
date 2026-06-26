@@ -54,7 +54,7 @@ def test_posts_openai_compatible_chat_completion_request_with_json_instructions(
     assert recorded["json"]["messages"][0]["role"] == "system"
     assert "JSON" in recorded["json"]["messages"][0]["content"]
     assert "untrusted" in recorded["json"]["messages"][0]["content"]
-    assert "decision, recommended_action, task_category, confidence" in recorded["json"]["messages"][0]["content"]
+    assert "decision, recommended_action, task_category, task_domain, confidence, reason" in recorded["json"]["messages"][0]["content"]
     assert "allow, alert_non_work, review_conflict, record_only" in recorded["json"]["messages"][0]["content"]
     assert "review_high_cost_unknown" not in recorded["json"]["messages"][0]["content"]
     assert "Do not repeat the input" in recorded["json"]["messages"][0]["content"]
@@ -91,7 +91,7 @@ def test_system_prompt_recommended_actions_match_current_worker_contract(monkeyp
     client.judge({"trace_id": "trace_actions"})
 
     prompt = recorded["prompt"]
-    assert "recommended_action must be one of allow, alert_non_work, review_conflict, record_only." in prompt
+    assert "recommended_action must be one of allow, alert_non_work, review_conflict, record_only" in prompt
     assert "review_high_cost_unknown" not in prompt
 
 
@@ -240,3 +240,28 @@ def test_rejects_legal_json_content_that_is_not_an_object(monkeypatch):
         client.judge({"trace_id": "trace_non_object_json"})
 
     assert exc_info.value.error_type == "invalid_json"
+
+
+def test_system_prompt_includes_off_industry_rule_when_org_domain_set():
+    client = LLMJudgeClient(
+        base_url="https://judge.example.com",
+        model="judge-model",
+        org_business_domain="金融服务",
+    )
+    prompt = client.system_prompt
+    assert client.org_business_domain == "金融服务"
+    assert "金融服务" in prompt
+    assert "DIFFERENT" in prompt  # off-industry clause
+    assert "Internal corporate functions" in prompt  # internal-function exclusion
+    assert "task_domain" in prompt
+    assert "reason" in prompt
+
+
+def test_system_prompt_omits_off_industry_rule_when_org_domain_unset():
+    client = LLMJudgeClient(base_url="https://judge.example.com", model="judge-model")
+    prompt = client.system_prompt
+    assert client.org_business_domain == ""
+    assert "DIFFERENT" not in prompt  # no off-industry clause
+    assert "Internal corporate functions" not in prompt
+    assert "task_domain" in prompt  # schema keys still present (uniform)
+    assert "reason" in prompt
