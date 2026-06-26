@@ -265,3 +265,24 @@ def test_system_prompt_omits_off_industry_rule_when_org_domain_unset():
     assert "Internal corporate functions" not in prompt
     assert "task_domain" in prompt  # schema keys still present (uniform)
     assert "reason" in prompt
+
+
+def test_system_prompt_internal_function_clause_is_bilingual_and_language_neutral():
+    client = LLMJudgeClient(
+        base_url="https://judge.example.com",
+        model="judge-model",
+        org_business_domain="金融服务",
+    )
+    prompt = client.system_prompt
+    assert "Internal corporate functions" in prompt  # anchor preserved
+    assert "采购" in prompt  # Chinese internal-function example present
+    assert "regardless of the language" in prompt
+
+
+def test_org_business_domain_is_length_capped():
+    client = LLMJudgeClient(
+        base_url="https://judge.example.com",
+        model="judge-model",
+        org_business_domain="金" * 300,
+    )
+    assert client.org_business_domain == "金" * 200

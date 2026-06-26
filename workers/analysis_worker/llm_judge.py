@@ -41,9 +41,10 @@ def _build_system_prompt(org_business_domain: str) -> str:
     if domain:
         parts.extend([
             f"The organization's business is {domain}. ",
-            "Internal corporate functions (administration, HR, procurement, "
-            "marketing/design, IT, legal, finance operations) are legitimate work "
-            "even when they are not part of the core business. ",
+            "Internal corporate functions (for example 人事/HR, 招聘/hiring, 采购/procurement, "
+            "市场与设计/marketing, IT 支持, 法务/legal, 财务运营/finance operations, 行政/administration) "
+            "are legitimate work even when they are not part of the core business, "
+            "regardless of the language used in the task. ",
             f"Classify as {DECISION_NON_WORK_RELATED} ONLY when the task clearly serves "
             f"an industry or business DIFFERENT from {domain} (for example, building a "
             "product or website for an unrelated company). ",
@@ -92,7 +93,7 @@ class LLMJudgeClient:
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
         self.max_tokens = max_tokens
-        self.org_business_domain = (org_business_domain or "").strip()
+        self.org_business_domain = (org_business_domain or "").strip()[:200]
         self.system_prompt = _build_system_prompt(self.org_business_domain)
 
     def judge(self, bundle: Mapping[str, Any]) -> dict[str, Any]:
