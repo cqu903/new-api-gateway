@@ -44,6 +44,8 @@ module.exports = {
   state,
   loadTraces,
   renderTraces,
+  renderAnomalies: typeof renderAnomalies !== "undefined" ? renderAnomalies : undefined,
+  renderTraceDetail: typeof renderTraceDetail !== "undefined" ? renderTraceDetail : undefined,
   applyTraceSearch: typeof applyTraceSearch !== "undefined" ? applyTraceSearch : undefined,
   parseTraceJumpPage: typeof parseTraceJumpPage !== "undefined" ? parseTraceJumpPage : undefined,
 };`,
@@ -133,4 +135,35 @@ test("renderTraces emits a jump-to-page input bounded by total pages", () => {
   app.renderTraces({ traces: [], pagination: { page: 2, page_size: 50, total_items: 150, total_pages: 3, has_prev: true, has_next: true } });
   assert.match(fakeApp.innerHTML, /id="trace-jump-page"[^>]*min="1"[^>]*max="3"/);
   assert.match(fakeApp.innerHTML, /id="trace-jump-go"/);
+});
+
+test("renderTraceDetail back button returns to the provided view and defaults to traces", async () => {
+  let backHandler;
+  const backBtn = {
+    addEventListener(evt, cb) { backHandler = cb; },
+    removeEventListener() {}, getAttribute() { return ""; },
+    matches() { return false; }, closest() { return null; },
+    style: {}, textContent: "",
+  };
+  const { app } = loadAppModule({
+    querySelector: (sel) => (sel === "#back-to-traces" ? backBtn : undefined),
+    fetch: async (url) => {
+      const json = url.includes("/anomalies")
+        ? { anomalies: [] }
+        : url.includes("/traces")
+          ? { traces: [], pagination: { page: 1, page_size: 50, total_items: 0, total_pages: 0, has_prev: false, has_next: false } }
+          : {};
+      return { ok: true, status: 200, json: async () => json, text: async () => "" };
+    },
+  });
+
+  app.renderTraceDetail({ trace: { trace_id: "trace_123" } }, "anomalies");
+  assert.equal(typeof backHandler, "function");
+  await backHandler();
+  assert.equal(app.state.view, "anomalies");
+
+  app.renderTraceDetail({ trace: { trace_id: "trace_456" } });
+  assert.equal(typeof backHandler, "function");
+  await backHandler();
+  assert.equal(app.state.view, "traces");
 });

@@ -1403,7 +1403,7 @@ function renderIdentities(body) {
   );
 }
 
-function renderTraceDetail(body) {
+function renderTraceDetail(body, returnView = "traces") {
   body = body || {};
   const trace = body.trace || {};
   const evidenceLinks = ["request_body", "response_body"]
@@ -1463,7 +1463,7 @@ function renderTraceDetail(body) {
     ),
   );
   document.querySelector("#back-to-traces").addEventListener("click", async () => {
-    state.view = "traces";
+    state.view = returnView;
     await loadView();
   });
 }
