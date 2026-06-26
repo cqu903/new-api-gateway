@@ -4,6 +4,7 @@ from media_extraction import MediaExtractionContext
 from models import AnalysisStage, parse_job
 from normalizers import normalize_json_trace
 from repository import PostgresAnalysisRepository
+from rules import detect_work_relevance_anomalies
 from work_relevance import classify_work_relevance
 
 
@@ -58,7 +59,8 @@ def default_process_enrichment(trace_id: str, **_kwargs) -> dict:
                 producer="llm_judge",
                 result_key="work_relevance_secondary",
             )
-            repository.save_trace_analysis([], [result], [])
+            anomalies = detect_work_relevance_anomalies(job, assessment)
+            repository.save_trace_analysis([], [result], [], anomalies=anomalies)
             analysis_result_count = 1
             llm_metadata = llm_judge_metadata(assessment)
     return {
