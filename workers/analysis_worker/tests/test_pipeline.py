@@ -4392,3 +4392,109 @@ def test_run_core_once_does_not_mark_terminal_before_dlq_publish_succeeds(monkey
 
     assert consumer.acked == []
     assert task_store.failed_terminal == []
+
+
+def test_enrichment_stage_emits_non_work_anomaly_for_off_domain_verdict(monkeypatch):
+    from enrichment_stage import EnrichmentStageProcessor
+    from models import TraceCapturedJob
+
+    saved = {}
+
+    class FakeRepo:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def load_trace_job_json(self, trace_id):
+            return "{}"
+
+        def save_trace_analysis(self, messages, results, aggregates, anomalies=(), coverage_alerts=()):
+            saved["anomalies"] = list(anomalies)
+
+    class FakeContextRepo:
+        def __init__(self, connection):
+            pass
+
+        def list_active_contexts(self):
+            return []
+
+    class FakeCursor:
+        def execute(self, query, params=None):
+            self.last = " ".join((query or "").split())
+
+        def fetchone(self):
+            return (True,)  # _core_requested_llm_judge -> True
+
+        def fetchall(self):
+            return []
+
+    class FakeConnection:
+        def __init__(self):
+            self.cursor_obj = FakeCursor()
+
+        def cursor(self):
+            return self.cursor_obj
+
+        def commit(self):
+            return None
+
+    class FakeEvidenceStore:
+        def read_text(self, _ref):
+            return ""
+
+    monkeypatch.setattr("enrichment_stage.PostgresAnalysisRepository", FakeRepo)
+    monkeypatch.setattr("enrichment_stage.PostgresContextRepository", FakeContextRepo)
+
+    fake_job = TraceCapturedJob(
+        type="trace_captured",
+        trace_id="trace_offdomain",
+        route_pattern="/v1/chat/completions",
+        protocol_family="openai_chat",
+        capture_mode="raw_and_normalized",
+        username="alice",
+        model_requested="gpt-5.4",
+        usage_total_tokens=25000,
+    )
+    monkeypatch.setattr("enrichment_stage.parse_job", lambda payload: fake_job)
+    monkeypatch.setattr("enrichment_stage.normalize_json_trace", lambda *a, **k: ([], []))
+
+    fake_assessment = type("Assessment", (), {
+        "evidence": [{"kind": "llm_judge", "source": "llm_judge"}],
+        "recommended_action": "alert_non_work",
+        "to_analysis_result": lambda self, **k: object(),
+    })()
+    monkeypatch.setattr("enrichment_stage.classify_work_relevance", lambda *a, **k: fake_assessment)
+
+    connection = FakeConnection()
+    processor = EnrichmentStageProcessor(
+        connection=connection,
+        evidence_store=FakeEvidenceStore(),
+        llm_judge=object(),
+    )
+
+    processor.process("trace_offdomain")
+
+    assert len(saved["anomalies"]) == 1
+    assert saved["anomalies"][0].anomaly_type == "non_work_use"
+
+
+def test_create_llm_judge_from_env_passes_org_business_domain(monkeypatch):
+    monkeypatch.setenv("LLM_JUDGE_BASE_URL", "https://judge.example.com")
+    monkeypatch.setenv("LLM_JUDGE_MODEL", "judge-model")
+    monkeypatch.setenv("ORG_BUSINESS_DOMAIN", "金融服务")
+
+    client = create_llm_judge_from_env()
+
+    assert client is not None
+    assert client.org_business_domain == "金融服务"
+    assert "金融服务" in client.system_prompt
+
+
+def test_create_llm_judge_from_env_defaults_org_business_domain_empty(monkeypatch):
+    monkeypatch.setenv("LLM_JUDGE_BASE_URL", "https://judge.example.com")
+    monkeypatch.setenv("LLM_JUDGE_MODEL", "judge-model")
+    monkeypatch.delenv("ORG_BUSINESS_DOMAIN", raising=False)
+
+    client = create_llm_judge_from_env()
+
+    assert client is not None
+    assert client.org_business_domain == ""

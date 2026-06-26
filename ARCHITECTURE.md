@@ -264,6 +264,10 @@ Trace 列表支持固定 50 条/页的页码分页，并可按员工前缀（ILI
 Worker 使用 `context_catalog` 的 aliases/keywords、独立 non-work 规则和 token 成本分层生成 `WorkRelevanceAssessment`。当规则冲突、弱信号中高成本、或高成本无强工作证据时，可调用外部 OpenAI-compatible vLLM endpoint 作为 LLM judge。
 
 LLM judge 只处理工作相关性 assessment，不直接生成 `AnomalyAlert`。异常落库仍由 `rules.py` 中的 `detect_anomalies()` 与 `detect_work_relevance_anomalies()` 统一完成：
+
+> 域外非工作检测由 enrichment 阶段的 LLM judge 主导，受 `ORG_BUSINESS_DOMAIN` 开关控制；core 阶段强制 `allow_llm=False`，因此 LLM 的 `non_work_related` 判定只会出现在 enrichment，`non_work_use` 异常也只会在 enrichment 阶段落地。
+
+异常落库：
 - `detect_anomalies()` 负责 3 类成本/时段异常：`high_trace_tokens`、`long_output_anomaly`、`off_hours_high_usage`
 - `detect_work_relevance_anomalies()` 只会把显式非工作相关收敛为 `non_work_use`
 - `isolation_forest.py` 的 `score_traces()` 离线批量打分，产出第 5 类 `multivariate_anomaly`，依赖 `model_artifacts` 中 `is_active=true` 的最新模型
@@ -276,6 +280,7 @@ LLM judge 只处理工作相关性 assessment，不直接生成 `AnomalyAlert`�
 - 任意 `LLM_JUDGE_*` 已配置但 `LLM_JUDGE_BASE_URL` / `LLM_JUDGE_MODEL` 不完整，或 `LLM_JUDGE_TIMEOUT_SECONDS` 非法时，worker 启动即 `SystemExit`。
 - `LLM_JUDGE_API_KEY` 不是必填项；未配置时会按无鉴权模式请求外部服务。
 - LLM 服务运行中不可用时，worker 会对相关 trace 记录 degraded metadata 并回退到保守规则，不会整体停止。
+- `ORG_BUSINESS_DOMAIN`：组织主业（如 `金融服务`）；设置后 LLM judge 会把"明确服务于其他行业"的 trace 判为 `non_work_related`（high 级 `non_work_use` 异常），内部职能仍算合法工作。未设置则保持通用判定。
 
 ## 数据库 Schema
 

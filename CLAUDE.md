@@ -56,6 +56,7 @@ docker compose -f deploy/docker-compose.yml --profile e2e --env-file .env.local 
 - worker 使用 Python 3.11+ 和 `uv`；Compose 容器启动命令里会先 `uv sync --quiet`。
 - 启用 OSS 证据存储时，Go 网关和 Python worker 都要能读到同一套 `OSS_*` 环境变量。
 - LLM judge 是可选外部能力；如果设置了任意 `LLM_JUDGE_*`，至少要同时设置 `LLM_JUDGE_BASE_URL` 和 `LLM_JUDGE_MODEL`，否则 worker 启动直接退出。
+- `ORG_BUSINESS_DOMAIN`：组织主业（如 `金融服务`）；设置后 LLM judge 会把"明确服务于其他行业"的 trace 判为 `non_work_related`（high 级 `non_work_use` 异常），内部职能仍算合法工作。未设置则保持通用判定。
 
 ## Testing Gotchas
 

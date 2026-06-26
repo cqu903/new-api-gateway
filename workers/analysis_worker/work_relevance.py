@@ -193,7 +193,8 @@ def classify_work_relevance(
                 "weight": adapted["confidence"],
                 "source": "llm_judge",
                 "snippet": intent.text[:120],
-                "reason": "LLM judge adapted work relevance decision.",
+                "task_domain": adapted.get("task_domain", ""),
+                "reason": adapted.get("reason") or "LLM judge adapted work relevance decision.",
             })
             return WorkRelevanceAssessment(
                 trace_id=job.trace_id,
@@ -589,6 +590,8 @@ def _adapt_llm_result(raw: Any) -> dict[str, Any]:
 
     return {
         "task_category": str(raw.get("task_category") or "unknown"),
+        "task_domain": str(raw.get("task_domain") or ""),
+        "reason": str(raw.get("reason") or ""),
         "decision": decision,
         "recommended_action": action,
         "needs_review": action in {
