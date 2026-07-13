@@ -92,4 +92,4 @@
 
 - postgres、redis、new-api 上游、audit-gateway 进程均已启动
 - migrations 已执行
-- API key `sk-G0YzOkt9WQAwp8S9DL9mLKlcFNEYRjdnA4x6PMrNRgZA05l8` 在 new-api 中有效且关联用户 `dave.zhao`
+- API key `sk-<your-new-api-token>` 在 new-api 中有效且关联用户 `dave.zhao`

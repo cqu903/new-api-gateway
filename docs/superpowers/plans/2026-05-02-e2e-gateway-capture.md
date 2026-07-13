@@ -441,7 +441,7 @@ Ensure the gateway and all dependencies are running, then:
 
 ```bash
 cd /Users/roy/codes/new-api-gateway
-export NEW_API_KEY=sk-G0YzOkt9WQAwp8S9DL9mLKlcFNEYRjdnA4x6PMrNRgZA05l8
+export NEW_API_KEY=sk-<your-new-api-token>
 uv run --project e2e e2e/test_gateway_capture.py
 ```
 

@@ -89,7 +89,7 @@
       NEW_API_POSTGRES_DSN: ${NEW_API_POSTGRES_DSN:-}
       POSTGRES_DSN: postgres://audit:audit@postgres:5432/audit_gateway?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      E2E_API_KEY: ${E2E_API_KEY:-sk-G0YzOkt9WQAwp8S9DL9mLKlcFNEYRjdnA4x6PMrNRgZA05l8}
+      E2E_API_KEY: ${E2E_API_KEY:-sk-<your-new-api-token>}
       E2E_OPENAI_MODEL: ${E2E_OPENAI_MODEL:-gpt-5.4}
       E2E_CLAUDE_MODEL: ${E2E_CLAUDE_MODEL:-claude-sonnet-4-6}
       EVIDENCE_STORAGE_BACKEND: ${EVIDENCE_STORAGE_BACKEND:-filesystem}
@@ -203,7 +203,7 @@ import requests
 
 GATEWAY_URL = os.environ.get("AUDIT_GATEWAY_URL", "http://audit-gateway:8080").rstrip("/")
 UPSTREAM_URL = os.environ.get("NEW_API_BASE_URL", "http://host.docker.internal:3000").rstrip("/")
-API_KEY = os.environ.get("E2E_API_KEY", "sk-G0YzOkt9WQAwp8S9DL9mLKlcFNEYRjdnA4x6PMrNRgZA05l8")
+API_KEY = os.environ.get("E2E_API_KEY", "sk-<your-new-api-token>")
 OPENAI_MODEL = os.environ.get("E2E_OPENAI_MODEL", "gpt-5.4")
 CLAUDE_MODEL = os.environ.get("E2E_CLAUDE_MODEL", "claude-sonnet-4-6")
 PG_DSN = os.environ.get(
@@ -1261,7 +1261,7 @@ git commit -m "refactor(e2e): drop oss-specific variants (backend-agnostic tests
 
 ```
 # --- E2E (docker-native, profile=e2e) ---
-E2E_API_KEY=sk-G0YzOkt9WQAwp8S9DL9mLKlcFNEYRjdnA4x6PMrNRgZA05l8
+E2E_API_KEY=sk-<your-new-api-token>
 E2E_OPENAI_MODEL=gpt-5.4
 E2E_CLAUDE_MODEL=claude-sonnet-4-6
 ```
