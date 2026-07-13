@@ -323,6 +323,7 @@ LLM judge 只处理工作相关性 assessment，不直接生成 `AnomalyAlert`�
 | `postgres` | `pgvector/pgvector:pg16` | 默认启动 | 网关 PostgreSQL（user: `audit`, db: `audit_gateway`，含 pgvector 扩展） |
 | `redis` | `redis:7` | 默认启动 | 任务队列 + 身份缓存 |
 | `migrate` | `postgres:16` | `--profile tools` | 执行 SQL 迁移 |
+| `e2e` | `uv:python3.11` | `--profile e2e` | 端到端测试 on-demand 容器（复用已部署网关 + 常驻 worker，不发布宿主机端口） |
 
 ## 常用命令
 

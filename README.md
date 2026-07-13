@@ -321,10 +321,10 @@ make smoke
 - `test_gateway_worker_pipeline.py`：完整 Worker 管线（网关采集 → Redis → 常驻 worker 分析 → DB 验证）
 - `test_media_extraction.py`：媒体 base64 提取（发送 base64 图片 → 常驻 worker 提取 → 证据改写验证）
 
-运行前需确保 postgres、redis、new-api、audit-gateway 及常驻 worker 均已部署，迁移已应用，且 new-api 侧已配齐 `E2E_OPENAI_MODEL` 与 `E2E_CLAUDE_MODEL` 对应的模型。
+运行前需确保 postgres、redis、new-api、audit-gateway 及常驻 worker 均已部署，迁移已应用。e2e 容器需要三个变量：`E2E_API_KEY`（调用上游 new-api 的真实 token）、`E2E_OPENAI_MODEL`、`E2E_CLAUDE_MODEL`（new-api 侧已配好的模型名）。这三个变量仅 e2e 需要、不属于正常部署，模板见 [`e2e/.env.example`](e2e/.env.example)——跑 e2e 前把填好的值追加到 `.env.local`（docker compose 通过 `--env-file .env.local` 对 `${E2E_*}` 插值注入 e2e 容器）。
 
 ```bash
-# E2E（docker 部署后，profile=e2e on-demand 容器；要求网关/postgres/redis/常驻 worker/new-api 已部署，且 new-api 配齐 E2E_OPENAI_MODEL 与 E2E_CLAUDE_MODEL）
+# E2E（docker 部署后，profile=e2e on-demand 容器；要求网关/postgres/redis/常驻 worker/new-api 已部署，且 .env.local 已配齐 E2E_API_KEY / E2E_OPENAI_MODEL / E2E_CLAUDE_MODEL）
 docker compose -f deploy/docker-compose.yml --profile e2e --env-file .env.local run --rm e2e
 ```
 

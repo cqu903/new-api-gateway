@@ -37,7 +37,7 @@ uv run pytest -q tests/test_normalizers.py
 uv run python main.py
 uv run python main.py --redis-once
 
-# E2E（docker 部署后，profile=e2e on-demand 容器；要求网关/postgres/redis/常驻 worker/new-api 已部署，且 new-api 配齐 E2E_OPENAI_MODEL 与 E2E_CLAUDE_MODEL）
+# E2E（docker 部署后，profile=e2e on-demand 容器；要求网关/postgres/redis/常驻 worker/new-api 已部署，且 .env.local 已配齐 E2E_API_KEY / E2E_OPENAI_MODEL / E2E_CLAUDE_MODEL）
 docker compose -f deploy/docker-compose.yml --profile e2e --env-file .env.local run --rm e2e
 ```
 
@@ -63,7 +63,8 @@ docker compose -f deploy/docker-compose.yml --profile e2e --env-file .env.local 
 
 ## Data And Safety
 
-- 不记录、不持久化 plaintext API key；相关逻辑只能用 HMAC 指纹、元数据和脱敏证据。
+- 不记录、不持久化任何敏感凭据（plaintext API key、token、密码、私钥、内嵌密码的 DSN 等）；业务逻辑只能用 HMAC 指纹、元数据和脱敏证据。
+- 文档、配置模板（`.env.example` 等）、示例代码、测试 fixture、提交信息里同样不得写入真实凭据，一律用占位符（如 `sk-<your-new-api-token>`）；若发现历史中已误提交真实凭据，必须在源头服务侧吊销/轮换——仅改工作区无法消除已外泄的凭据。
 - 证据存储同时有 filesystem/OSS 两条路径；涉及 `object_ref`、证据派生、副本写回时，注意兼容 `file:///` 和 `oss://`。
 - 修改 schema 时只新增 `migrations/NNNN_*.sql`，不要改写已发布迁移。迁移执行器会维护 `schema_migrations`，并对部分历史迁移做兼容性补记。
 
