@@ -1,9 +1,11 @@
 import json
+import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
 import redis
 
+from contract import STREAM_ENRICHMENT
 from models import AnalysisStage, StreamEnvelope
 
 
@@ -66,7 +68,7 @@ class StreamConsumer:
             return []
         reclaimed_entries = reclaimed[1] if len(reclaimed) > 1 else []
         if reclaimed_entries:
-            return [_message_from_entry(self.stream_name, entry) for entry in reclaimed_entries]
+            return self._messages_from_entries(reclaimed_entries)
 
         try:
             response = self.client.xreadgroup(
@@ -83,7 +85,22 @@ class StreamConsumer:
         stream_name, entries = response[0]
         if not entries:
             return []
-        return [_message_from_entry(stream_name, entry) for entry in entries]
+        return self._messages_from_entries(entries)
+
+    def _messages_from_entries(self, entries) -> list[StreamMessage]:
+        # per-entry 解析：未知 stage（drift）的消息 ack 丢弃 + 告警，不让整批卡在 PENDING（poison 防护）。见 ADR-0003。
+        messages: list[StreamMessage] = []
+        for entry in entries:
+            try:
+                messages.append(_message_from_entry(self.stream_name, entry))
+            except UnknownStageError as exc:
+                message_id = entry[0]
+                self.client.xack(self.stream_name, self.group_name, message_id)
+                print(
+                    json.dumps({"event": "unknown_stage_acked", "stream": self.stream_name, "message_id": message_id, "error": str(exc)}),
+                    file=sys.stderr,
+                )
+        return messages
 
     def ack(self, message_id: str) -> int:
         return self.client.xack(self.stream_name, self.group_name, message_id)
@@ -114,21 +131,25 @@ def stream_message_id_to_enqueued_at(message_id: str) -> str:
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
 
 
+class UnknownStageError(ValueError):
+    """stream 消息含非空但未知的 stage（Go/Python 契约漂移）。见 ADR-0003。"""
+
+
 def _default_stage_for_stream(stream_name: str) -> AnalysisStage:
-    if stream_name == "analysis.enrichment":
+    if stream_name == STREAM_ENRICHMENT:
         return AnalysisStage.ENRICHMENT
     return AnalysisStage.CORE
 
 
 def _parse_stage(stream_name: str, raw_stage) -> AnalysisStage:
-    default_stage = _default_stage_for_stream(stream_name)
+    # 空 stage → 默认值（兼容旧消息）；非空未知 stage → fail-loud（drift 不静默退化）。见 ADR-0003。
     candidate = str(raw_stage or "").strip()
     if not candidate:
-        return default_stage
+        return _default_stage_for_stream(stream_name)
     try:
         return AnalysisStage(candidate)
-    except ValueError:
-        return default_stage
+    except ValueError as exc:
+        raise UnknownStageError(f"stream {stream_name}: unknown stage {candidate!r}") from exc
 
 
 def _parse_attempt(raw_attempt) -> int:

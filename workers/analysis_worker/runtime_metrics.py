@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from contract import STAGE_CORE, STAGE_ENRICHMENT, STREAM_ENRICHMENT
+
 
 def _stage_for_stream(stream_name: str) -> str:
-    if stream_name == "analysis.enrichment":
-        return "enrichment"
-    return "core"
+    if stream_name == STREAM_ENRICHMENT:
+        return STAGE_ENRICHMENT
+    return STAGE_CORE
 
 
 def _group_stats(groups: list[Any], group_name: str) -> tuple[int, int, int]:

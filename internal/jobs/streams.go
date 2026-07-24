@@ -12,7 +12,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const DefaultRedisCoreStream = "analysis.core"
+const (
+	DefaultRedisCoreStream       = "analysis.core"
+	DefaultRedisEnrichmentStream = "analysis.enrichment"
+
+	StageCore       = "core"
+	StageEnrichment = "enrichment"
+
+	GroupCore       = "analysis-core-workers"
+	GroupEnrichment = "analysis-enrichment-workers"
+)
 
 var ErrRedisStreamClientRequired = errors.New("jobs redis stream client is nil")
 
@@ -75,7 +84,7 @@ func (p RedisStreamPublisher) PublishTraceCaptured(ctx context.Context, input Tr
 	}
 	values := map[string]any{
 		"trace_id": input.TraceID,
-		"stage":    "core",
+		"stage":    StageCore,
 		"attempt":  int64(1),
 		"hints":    string(hints),
 	}

@@ -1,4 +1,5 @@
 import json
+import pytest
 import redis
 
 from models import AnalysisStage
@@ -337,7 +338,7 @@ def test_stream_consumer_reads_batch_messages_from_xreadgroup():
     assert [message.envelope.trace_id for message in messages] == ["trace_1", "trace_2"]
 
 
-def test_stream_consumer_tolerates_invalid_stage_attempt_and_hints():
+def test_stream_consumer_tolerates_invalid_attempt_and_hints():
     class InvalidEnvelopeRedisClient(FakeRedisClient):
         def xreadgroup(self, groupname, consumername, streams, count=1, block=0):
             self.readgroup_calls.append((groupname, consumername, streams, count, block))
@@ -349,7 +350,7 @@ def test_stream_consumer_tolerates_invalid_stage_attempt_and_hints():
                             "1748944471000-2",
                             {
                                 "trace_id": "trace_invalid",
-                                "stage": "not-a-real-stage",
+                                "stage": "enrichment",
                                 "attempt": "NaN",
                                 "hints": "{bad json",
                             },
@@ -372,3 +373,56 @@ def test_stream_consumer_tolerates_invalid_stage_attempt_and_hints():
     assert message.envelope.stage == AnalysisStage.ENRICHMENT
     assert message.envelope.attempt == 1
     assert message.envelope.hints == {}
+
+
+def test_parse_stage_fail_loud_on_unknown_nonempty_stage():
+    from streams import UnknownStageError, _parse_stage
+
+    # 空 stage 保留默认（兼容旧消息）
+    assert _parse_stage("analysis.core", "") == AnalysisStage.CORE
+    assert _parse_stage("analysis.core", None) == AnalysisStage.CORE
+    assert _parse_stage("analysis.enrichment", "  ") == AnalysisStage.ENRICHMENT
+    # 已知 stage 正常解析
+    assert _parse_stage("analysis.core", "core") == AnalysisStage.CORE
+    assert _parse_stage("analysis.enrichment", "enrichment") == AnalysisStage.ENRICHMENT
+    # 非空未知 stage → fail-loud（drift 不静默退化）
+    with pytest.raises(UnknownStageError):
+        _parse_stage("analysis.core", "not-a-real-stage")
+
+
+def test_stream_consumer_acks_unknown_stage_fail_loud():
+    class UnknownStageRedisClient(FakeRedisClient):
+        def __init__(self):
+            super().__init__()
+            self.acked = []
+
+        def xack(self, stream_name, group_name, message_id):
+            self.acked.append(message_id)
+            return 1
+
+        def xreadgroup(self, groupname, consumername, streams, count=1, block=0):
+            self.readgroup_calls.append((groupname, consumername, streams, count, block))
+            return [
+                (
+                    "analysis.enrichment",
+                    [
+                        (
+                            "1748944471000-9",
+                            {"trace_id": "trace_unknown_stage", "stage": "not-a-real-stage"},
+                        )
+                    ],
+                )
+            ]
+
+    client = UnknownStageRedisClient()
+    consumer = StreamConsumer(
+        client,
+        stream_name="analysis.enrichment",
+        group_name="analysis-enrichment-workers",
+        consumer_name="worker-1",
+    )
+
+    message = consumer.read_one(count=1, block_ms=5000)
+
+    assert message is None  # unknown stage → ack 丢弃，不入列（防 poison 卡住）
+    assert "1748944471000-9" in client.acked

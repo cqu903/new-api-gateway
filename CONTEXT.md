@@ -35,6 +35,19 @@
 - **单一真相源**在 `verdict_vocab.py`：判定器（prompt + 校验）、work_relevance（规则路径 `_decision_from_scores` + 评分 `_adapt_llm_result`）、rules.py（异常触发）三方共用，避免字面量漂移。
 - 不归任一产出者：LLM 判定与规则评分是裁决的两条产出路径，共用同一套词表。
 
+## 分析任务契约
+
+### analysis job contract（分析任务契约）
+
+Go 网关与 Python worker 之间的跨进程契约有**两条**：
+
+1. **Redis stream message**：`trace_id` / `stage` / `attempt` / `hints` / `enqueued_at`；stream 名 `analysis.core` / `analysis.enrichment`，消费组名 `analysis-core-workers` / `analysis-enrichment-workers`。
+2. **`traces` 表**：完整 trace payload（28 字段的 `TraceCapturedJob` 是它的内存映射）——**DB schema（migrations）是真相源**，不在代码层重复；worker 经 `load_trace_job_json(trace_id)` 从 DB 读，**不跨 stream**。
+
+- **stage / stream / group 名双侧共享常量**：Go（`internal/jobs`）与 Python（`contract.py`）各定义同名同值，靠契约测试 + e2e 守一致。
+- **不变量：未知 stage fail-loud**——worker 解析到非空但未知的 stage 不静默退化，而是抛错（归 terminal → DLQ），让 drift 可见。空 stage 保留默认值（兼容旧消息）。
+- **DLQ**（`analysis.dlq`）是 Python worker 单侧概念，不跨进程共享。
+
 ## 既有术语（种子，待 `/domain-modeling` 深化）
 
 以下为项目已确立的核心领域词，此处仅作索引，定义待后续补全。
@@ -43,5 +56,3 @@
 - **anomaly（异常）**：对 trace 用量/行为偏离基线的标记。
 - **evidence（证据）**：请求体/响应体/头部等审计证据对象（filesystem 或 OSS 两条路径）。
 - **identity snapshot（身份快照）**：由 token 指纹解析出的调用方身份。
-- **stage（阶段）**：分析流水线的阶段（core / enrichment），各对应一条 Redis stream。
-- **stream（流）**：`analysis.core`、`analysis.enrichment` 两条 Redis Streams。

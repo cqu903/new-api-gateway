@@ -15,6 +15,7 @@ import psycopg
 import redis
 from psycopg_pool import ConnectionPool
 
+from contract import GROUP_CORE, GROUP_ENRICHMENT, STREAM_CORE, STREAM_ENRICHMENT
 from context_repository import PostgresContextRepository
 from evidence import EvidenceStore, FilesystemEvidenceStore
 from media_extraction import MediaExtractionContext
@@ -352,12 +353,12 @@ def build_stage_processor(
     from enrichment_stage import EnrichmentStageProcessor
 
     processor_classes = {
-        "analysis.core": ("analysis-core-workers", CoreStageProcessor),
-        "analysis.enrichment": ("analysis-enrichment-workers", EnrichmentStageProcessor),
+        STREAM_CORE: (GROUP_CORE, CoreStageProcessor),
+        STREAM_ENRICHMENT: (GROUP_ENRICHMENT, EnrichmentStageProcessor),
     }
     group_name, processor_class = processor_classes.get(
         stream_name,
-        ("analysis-core-workers", CoreStageProcessor),
+        (GROUP_CORE, CoreStageProcessor),
     )
     processor = processor_class(
         connection=connection,
@@ -561,15 +562,15 @@ def process_redis_loop(
     print(json.dumps({"worker_status": "starting", "worker_id": wid, "list": list_name}), flush=True)
 
     batch_configs = {
-        "analysis.core": {
-            "group_name": "analysis-core-workers",
+        STREAM_CORE: {
+            "group_name": GROUP_CORE,
             "read_count": core_read_count(),
             "max_inflight": core_max_inflight(),
             "lease_seconds": core_lease_seconds(),
             "retry_limit": core_retry_limit(),
         },
-        "analysis.enrichment": {
-            "group_name": "analysis-enrichment-workers",
+        STREAM_ENRICHMENT: {
+            "group_name": GROUP_ENRICHMENT,
             "read_count": enrichment_read_count(),
             "max_inflight": enrichment_max_inflight(),
             "lease_seconds": enrichment_lease_seconds(),
@@ -805,8 +806,8 @@ def run_core_once(
     connection,
     stage_processor,
     worker_id: str,
-    stream_name: str = "analysis.core",
-    group_name: str = "analysis-core-workers",
+    stream_name: str = STREAM_CORE,
+    group_name: str = GROUP_CORE,
     block_ms: int = 5000,
     lease_seconds: int = 300,
     max_attempts: int = 5,
@@ -1145,8 +1146,8 @@ def run_core_batch_once(
     storage_backend: str,
     llm_judge,
     worker_id: str,
-    stream_name: str = "analysis.core",
-    group_name: str = "analysis-core-workers",
+    stream_name: str = STREAM_CORE,
+    group_name: str = GROUP_CORE,
     block_ms: int = 5000,
     read_count: int = 16,
     max_inflight: int = 8,
@@ -1380,7 +1381,7 @@ def maybe_enqueue_enrichment_after_core_commit(
     connection,
     message,
     result: dict,
-    stream_name: str = "analysis.enrichment",
+    stream_name: str = STREAM_ENRICHMENT,
 ) -> dict:
     if message.envelope.stage != AnalysisStage.CORE:
         return result
@@ -1481,7 +1482,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--redis-once", action="store_true")
     parser.add_argument("--redis-url", default=os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
-    parser.add_argument("--redis-list", default=os.environ.get("ANALYSIS_REDIS_LIST", "analysis.core"))
+    parser.add_argument("--redis-list", default=os.environ.get("ANALYSIS_REDIS_LIST", STREAM_CORE))
     parser.add_argument("--redis-timeout-seconds", type=int, default=5)
     parser.add_argument("--postgres-dsn", default=os.environ.get("POSTGRES_DSN", ""))
     parser.add_argument("--offline-batch", action="store_true",
