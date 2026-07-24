@@ -332,13 +332,20 @@ func parseBoolQueryParam(raw string) bool {
 	}
 }
 
-func (h Handler) listTraces(w http.ResponseWriter, r *http.Request) {
-	page := 1
-	if rawPage := strings.TrimSpace(r.URL.Query().Get("page")); rawPage != "" {
-		if parsed, err := strconv.Atoi(rawPage); err == nil && parsed > 0 {
-			page = parsed
-		}
+// parsePageParam 把 "page" 查询参数解析为 >=1 的整数；缺失、空白或非法时返回 1。
+func parsePageParam(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 1
 	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 1 {
+		return 1
+	}
+	return parsed
+}
+
+func (h Handler) listTraces(w http.ResponseWriter, r *http.Request) {
 	filter := TraceFilter{
 		TraceID:          r.URL.Query().Get("trace_id"),
 		Username:         r.URL.Query().Get("username"),
@@ -346,8 +353,8 @@ func (h Handler) listTraces(w http.ResponseWriter, r *http.Request) {
 		RoutePattern:     r.URL.Query().Get("route_pattern"),
 		Model:            r.URL.Query().Get("model"),
 		NeedsReview:      parseBoolQueryParam(r.URL.Query().Get("needs_review")),
-		Page:             page,
-		Limit:            50,
+		Page:             parsePageParam(r.URL.Query().Get("page")),
+		Limit:            defaultListPageSize,
 	}
 	items, err := h.repo.ListTraces(r.Context(), filter)
 	if err != nil {
@@ -591,16 +598,10 @@ func (h Handler) listAuditLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) listAnomalies(w http.ResponseWriter, r *http.Request) {
-	page := 1
-	if rawPage := strings.TrimSpace(r.URL.Query().Get("page")); rawPage != "" {
-		if parsed, err := strconv.Atoi(rawPage); err == nil && parsed > 0 {
-			page = parsed
-		}
-	}
 	filter := AnomalyFilter{
 		AnomalyType: strings.TrimSpace(r.URL.Query().Get("anomaly_type")),
-		Page:        page,
-		Limit:       50,
+		Page:        parsePageParam(r.URL.Query().Get("page")),
+		Limit:       defaultListPageSize,
 	}
 	result, err := h.repo.ListAnomalies(r.Context(), filter)
 	if err != nil {

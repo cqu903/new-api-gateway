@@ -202,18 +202,41 @@ INSERT INTO review_decisions (
 	return err
 }
 
-func normalizeTraceListPage(page int) int {
+func normalizeListPage(page int) int {
 	if page < 1 {
 		return 1
 	}
 	return page
 }
 
-func normalizeTraceListLimit(limit int) int {
+func normalizeListLimit(limit int) int {
 	if limit <= 0 || limit > 100 {
 		return 100
 	}
 	return limit
+}
+
+// clampPagination 在已知结果集总数后推算分页元数据：计算 totalPages、把 page 钳到有效区间，
+// 并派生 HasPrev/HasNext。page/limit 应已由 normalizeListPage/Limit 规整。空结果集时
+// page=1、totalPages=0。详见 ADR-0001 与 CONTEXT.md → Pagination。
+func clampPagination(page, limit int, totalItems int64) Pagination {
+	totalPages := 0
+	if totalItems > 0 {
+		totalPages = int((totalItems + int64(limit) - 1) / int64(limit))
+		if page > totalPages {
+			page = totalPages
+		}
+	} else {
+		page = 1
+	}
+	return Pagination{
+		Page:       page,
+		PageSize:   limit,
+		TotalItems: totalItems,
+		TotalPages: totalPages,
+		HasPrev:    totalPages > 0 && page > 1,
+		HasNext:    totalPages > 0 && page < totalPages,
+	}
 }
 
 // escapeILIKE 转义 ILIKE 元字符（\ % _），配合 SQL 的 ESCAPE '\' 使用，
@@ -258,8 +281,8 @@ func (r Repository) listTraceRows(ctx context.Context, filter TraceFilter) ([]Tr
 	if r.db == nil {
 		return nil, ErrAdminDBRequired
 	}
-	page := normalizeTraceListPage(filter.Page)
-	limit := normalizeTraceListLimit(filter.Limit)
+	page := normalizeListPage(filter.Page)
+	limit := normalizeListLimit(filter.Limit)
 	where, args := traceFilterWhereArgs(filter)
 	offset := (page - 1) * limit
 	listArgs := append(append([]any(nil), args...), limit, offset)
@@ -301,8 +324,8 @@ func (r Repository) ListTraces(ctx context.Context, filter TraceFilter) (TraceLi
 	if r.db == nil {
 		return TraceListResult{}, ErrAdminDBRequired
 	}
-	page := normalizeTraceListPage(filter.Page)
-	limit := normalizeTraceListLimit(filter.Limit)
+	page := normalizeListPage(filter.Page)
+	limit := normalizeListLimit(filter.Limit)
 	where, args := traceFilterWhereArgs(filter)
 
 	var totalItems int64
@@ -311,17 +334,9 @@ func (r Repository) ListTraces(ctx context.Context, filter TraceFilter) (TraceLi
 		return TraceListResult{}, err
 	}
 
-	totalPages := 0
-	if totalItems > 0 {
-		totalPages = int((totalItems + int64(limit) - 1) / int64(limit))
-		if page > totalPages {
-			page = totalPages
-		}
-	} else {
-		page = 1
-	}
+	pagination := clampPagination(page, limit, totalItems)
 
-	filter.Page = page
+	filter.Page = pagination.Page
 	filter.Limit = limit
 	traces, err := r.listTraceRows(ctx, filter)
 	if err != nil {
@@ -329,15 +344,8 @@ func (r Repository) ListTraces(ctx context.Context, filter TraceFilter) (TraceLi
 	}
 
 	return TraceListResult{
-		Traces: traces,
-		Pagination: Pagination{
-			Page:       page,
-			PageSize:   limit,
-			TotalItems: totalItems,
-			TotalPages: totalPages,
-			HasPrev:    totalPages > 0 && page > 1,
-			HasNext:    totalPages > 0 && page < totalPages,
-		},
+		Traces:     traces,
+		Pagination: pagination,
 	}, nil
 }
 
@@ -355,8 +363,8 @@ func (r Repository) ListAnomalies(ctx context.Context, filter AnomalyFilter) (An
 	if r.db == nil {
 		return AnomalyListResult{}, ErrAdminDBRequired
 	}
-	page := normalizeTraceListPage(filter.Page)
-	limit := normalizeTraceListLimit(filter.Limit)
+	page := normalizeListPage(filter.Page)
+	limit := normalizeListLimit(filter.Limit)
 	where, args := anomalyFilterWhereArgs(filter)
 
 	var totalItems int64
@@ -365,17 +373,9 @@ func (r Repository) ListAnomalies(ctx context.Context, filter AnomalyFilter) (An
 		return AnomalyListResult{}, err
 	}
 
-	totalPages := 0
-	if totalItems > 0 {
-		totalPages = int((totalItems + int64(limit) - 1) / int64(limit))
-		if page > totalPages {
-			page = totalPages
-		}
-	} else {
-		page = 1
-	}
+	pagination := clampPagination(page, limit, totalItems)
 
-	offset := (page - 1) * limit
+	offset := (pagination.Page - 1) * limit
 	listArgs := append(append([]any(nil), args...), limit, offset)
 	query := fmt.Sprintf(`
 SELECT anomaly_id, anomaly_type, severity, status, username, fingerprint_display,
@@ -406,15 +406,8 @@ LIMIT $%d OFFSET $%d`, strings.Join(where, " AND "), len(args)+1, len(args)+2)
 		return AnomalyListResult{}, err
 	}
 	return AnomalyListResult{
-		Anomalies: items,
-		Pagination: Pagination{
-			Page:       page,
-			PageSize:   limit,
-			TotalItems: totalItems,
-			TotalPages: totalPages,
-			HasPrev:    totalPages > 0 && page > 1,
-			HasNext:    totalPages > 0 && page < totalPages,
-		},
+		Anomalies:  items,
+		Pagination: pagination,
 	}, nil
 }
 

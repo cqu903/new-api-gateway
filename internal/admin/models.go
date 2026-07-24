@@ -87,6 +87,10 @@ type TraceFilter struct {
 	Limit            int
 }
 
+// defaultListPageSize 是分页列表的默认页大小：handler 在请求未显式指定页大小时采用，
+// 也是响应回传 page_size 的来源。这是 pageSize 的唯一真值源（见 CONTEXT.md → Pagination）。
+const defaultListPageSize = 50
+
 type Pagination struct {
 	Page       int   `json:"page"`
 	PageSize   int   `json:"page_size"`

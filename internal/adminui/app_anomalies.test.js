@@ -39,7 +39,7 @@ function loadAppModule(overrides = {}) {
         return [];
       },
     },
-    window: { innerHeight: 900, innerWidth: 1440, UsagePage: { renderUsagePage: () => "" }, AdminAnalysisResultCards: { renderAnalysisResultCards: () => "" }, Chart: overrides.Chart || function Chart() {} },
+    window: { innerHeight: 900, innerWidth: 1440, UsagePage: { renderUsagePage: () => "" }, AdminAnalysisResultCards: { renderAnalysisResultCards: () => "" }, Chart: overrides.Chart || function Chart() {}, Pagination: require("./pagination.js") },
     fetch: overrides.fetch || (async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" })),
     module: { exports: {} },
     exports: {},
@@ -50,9 +50,6 @@ module.exports = {
   state,
   loadAnomalies: typeof loadAnomalies !== "undefined" ? loadAnomalies : undefined,
   renderAnomalies: typeof renderAnomalies !== "undefined" ? renderAnomalies : undefined,
-  normalizeAnomalyPagination: typeof normalizeAnomalyPagination !== "undefined" ? normalizeAnomalyPagination : undefined,
-  anomalyPageNumbers: typeof anomalyPageNumbers !== "undefined" ? anomalyPageNumbers : undefined,
-  parseAnomalyJumpPage: typeof parseAnomalyJumpPage !== "undefined" ? parseAnomalyJumpPage : undefined,
   applyAnomalyFilter: typeof applyAnomalyFilter !== "undefined" ? applyAnomalyFilter : undefined,
   ANOMALY_TYPE_FILTERS: typeof ANOMALY_TYPE_FILTERS !== "undefined" ? ANOMALY_TYPE_FILTERS : undefined,
 };`,
@@ -61,30 +58,9 @@ module.exports = {
   return { app: sandbox.module.exports, fakeApp };
 }
 
-test("parseAnomalyJumpPage validates page input against total pages", () => {
-  const { app } = loadAppModule();
-  const total = 5;
-  assert.equal(app.parseAnomalyJumpPage("3", total), 3);
-  assert.equal(app.parseAnomalyJumpPage(" 2 ", total), 2);
-  assert.equal(app.parseAnomalyJumpPage("1", total), 1);
-  assert.equal(app.parseAnomalyJumpPage("5", total), 5);
-  assert.equal(app.parseAnomalyJumpPage("", total), null);
-  assert.equal(app.parseAnomalyJumpPage("abc", total), null);
-  assert.equal(app.parseAnomalyJumpPage("0", total), null);
-  assert.equal(app.parseAnomalyJumpPage("6", total), null);
-  assert.equal(app.parseAnomalyJumpPage("-1", total), null);
-  assert.equal(app.parseAnomalyJumpPage("2.5", total), null);
-});
+// parseAnomalyJumpPage 的测试已迁至 pagination.test.js（与 trace 合并测 Pagination.parseJumpPage）。
 
-test("normalizeAnomalyPagination falls back to state.anomalies when payload missing", () => {
-  const { app } = loadAppModule();
-  app.state.anomalies.page = 2;
-  app.state.anomalies.pageSize = 50;
-  const p = app.normalizeAnomalyPagination(undefined);
-  assert.equal(p.page, 2);
-  assert.equal(p.pageSize, 50);
-  assert.equal(p.totalPages, 0);
-});
+// normalize 的 fallback 测试已迁至 pagination.test.js（直接测 Pagination.normalize）。
 
 test("ANOMALY_TYPE_FILTERS includes 全部 plus the five live types", () => {
   const { app } = loadAppModule();
