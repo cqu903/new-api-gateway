@@ -11,6 +11,7 @@ from models import (
     coverage_alert_id,
     stable_suffix,
 )
+from verdict_vocab import ACTION_ALERT_NON_WORK
 
 
 DETECTOR_VERSION = "rules_mvp_2026_06_03"
@@ -96,7 +97,7 @@ def detect_work_relevance_anomalies(
 ) -> list[AnomalyAlert]:
     action = getattr(assessment, "recommended_action", "")
 
-    if action == "alert_non_work":
+    if action == ACTION_ALERT_NON_WORK:
         return [_anomaly(
             job,
             "non_work_use",

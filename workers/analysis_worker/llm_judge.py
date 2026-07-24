@@ -7,7 +7,12 @@ from typing import Any, Mapping
 
 import httpx
 
-from work_relevance import (
+from verdict_vocab import (
+    ACTIONS,
+    DECISIONS,
+    VALID_ACTIONS,
+    VALID_DECISION_ACTIONS,
+    VALID_DECISIONS,
     ACTION_ALERT_NON_WORK,
     ACTION_ALLOW,
     ACTION_RECORD_ONLY,
@@ -16,20 +21,6 @@ from work_relevance import (
     DECISION_NON_WORK_RELATED,
     DECISION_UNKNOWN,
     DECISION_WORK_RELATED,
-)
-
-
-_ALLOWED_DECISIONS = (
-    DECISION_WORK_RELATED,
-    DECISION_NON_WORK_RELATED,
-    DECISION_NEEDS_REVIEW,
-    DECISION_UNKNOWN,
-)
-_ALLOWED_ACTIONS = (
-    ACTION_ALLOW,
-    ACTION_ALERT_NON_WORK,
-    ACTION_REVIEW_CONFLICT,
-    ACTION_RECORD_ONLY,
 )
 
 def _build_system_prompt(org_business_domain: str) -> str:
@@ -54,8 +45,8 @@ def _build_system_prompt(org_business_domain: str) -> str:
     parts.extend([
         "Return only one JSON object with exactly these keys: "
         "decision, recommended_action, task_category, task_domain, confidence, reason. ",
-        f"decision must be one of {', '.join(_ALLOWED_DECISIONS)}. ",
-        f"recommended_action must be one of {', '.join(_ALLOWED_ACTIONS)} "
+        f"decision must be one of {', '.join(DECISIONS)}. ",
+        f"recommended_action must be one of {', '.join(ACTIONS)} "
         f"(use {ACTION_ALERT_NON_WORK} for {DECISION_NON_WORK_RELATED}, "
         f"{ACTION_REVIEW_CONFLICT} for {DECISION_NEEDS_REVIEW}, "
         f"{ACTION_ALLOW} for {DECISION_WORK_RELATED}, "
@@ -78,6 +69,18 @@ class LLMJudgeUnavailable(Exception):
         super().__init__(self.message)
 
 
+@dataclass(frozen=True)
+class Verdict:
+    """judge() 的返回：对一个 trace bundle 校验过的分类结果（见 CONTEXT.md → Verdict）。"""
+
+    decision: str
+    recommended_action: str
+    confidence: float
+    task_category: str
+    task_domain: str
+    reason: str
+
+
 class LLMJudgeClient:
     def __init__(
         self,
@@ -96,7 +99,7 @@ class LLMJudgeClient:
         self.org_business_domain = (org_business_domain or "").strip()[:200]
         self.system_prompt = _build_system_prompt(self.org_business_domain)
 
-    def judge(self, bundle: Mapping[str, Any]) -> dict[str, Any]:
+    def judge(self, bundle: Mapping[str, Any]) -> Verdict:
         payload = {
             "model": self.model,
             "temperature": 0,
@@ -133,7 +136,7 @@ class LLMJudgeClient:
 
         response_json = self._response_json(response)
         content = self._extract_content(response_json)
-        return self._parse_json_object(content)
+        return _build_verdict(self._parse_json_object(content))
 
     def _response_json(self, response: httpx.Response) -> dict[str, Any]:
         try:
@@ -177,3 +180,35 @@ class LLMJudgeClient:
         if match:
             return match.group(1).strip()
         return content
+
+
+def _clamp_float(value: Any, lower: float, upper: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = lower
+    return max(lower, min(upper, numeric))
+
+
+def _build_verdict(raw: dict[str, Any]) -> Verdict:
+    """把 LLM 返回的 raw dict 校验并构造为 Verdict；非法 / 配对不符抛 LLMJudgeUnavailable("invalid_result")。"""
+    decision = raw.get("decision")
+    action = raw.get("recommended_action")
+    if decision not in VALID_DECISIONS or action not in VALID_ACTIONS:
+        raise LLMJudgeUnavailable(
+            "invalid_result",
+            f"LLM judge returned illegal decision/action: decision={decision!r} action={action!r}",
+        )
+    if action not in VALID_DECISION_ACTIONS.get(decision, frozenset()):
+        raise LLMJudgeUnavailable(
+            "invalid_result",
+            f"LLM judge returned mismatched decision/action: decision={decision!r} action={action!r}",
+        )
+    return Verdict(
+        decision=decision,
+        recommended_action=action,
+        confidence=_clamp_float(raw.get("confidence", 0.7), 0.0, 1.0),
+        task_category=str(raw.get("task_category") or "unknown"),
+        task_domain=str(raw.get("task_domain") or ""),
+        reason=str(raw.get("reason") or ""),
+    )

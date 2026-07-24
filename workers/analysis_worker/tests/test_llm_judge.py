@@ -16,7 +16,7 @@ def test_posts_openai_compatible_chat_completion_request_with_json_instructions(
                 "choices": [
                     {
                         "message": {
-                            "content": '{"decision":"allow"}',
+                            "content": '{"decision":"work_related","recommended_action":"allow","confidence":0.9}',
                         }
                     }
                 ]
@@ -41,7 +41,8 @@ def test_posts_openai_compatible_chat_completion_request_with_json_instructions(
 
     result = client.judge({"trace_id": "trace_1", "score": 0.91})
 
-    assert result == {"decision": "allow"}
+    assert result.decision == "work_related"
+    assert result.recommended_action == "allow"
     assert recorded["url"] == "https://judge.example.com/chat/completions"
     assert recorded["headers"] == {
         "Content-Type": "application/json",
@@ -74,7 +75,7 @@ def test_system_prompt_recommended_actions_match_current_worker_contract(monkeyp
                 "choices": [
                     {
                         "message": {
-                            "content": '{"recommended_action":"record_only"}',
+                            "content": '{"decision":"unknown","recommended_action":"record_only"}',
                         }
                     }
                 ]
@@ -105,7 +106,7 @@ def test_accepts_json_wrapped_in_markdown_fence(monkeypatch):
                 "choices": [
                     {
                         "message": {
-                            "content": "```json\n{\"decision\":\"deny\"}\n```",
+                            "content": "```json\n{\"decision\":\"non_work_related\",\"recommended_action\":\"alert_non_work\"}\n```",
                         }
                     }
                 ]
@@ -117,7 +118,7 @@ def test_accepts_json_wrapped_in_markdown_fence(monkeypatch):
 
     result = client.judge({"trace_id": "trace_2"})
 
-    assert result == {"decision": "deny"}
+    assert result.decision == "non_work_related"
 
 
 def test_raises_unavailable_on_timeout(monkeypatch):
@@ -286,3 +287,39 @@ def test_org_business_domain_is_length_capped():
         org_business_domain="金" * 300,
     )
     assert client.org_business_domain == "金" * 200
+
+
+def _judge_response(monkeypatch, content):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: FakeResponse())
+
+
+def test_verdict_rejects_illegal_decision_as_invalid_result(monkeypatch):
+    _judge_response(monkeypatch, '{"decision":"maybe","recommended_action":"allow"}')
+    client = LLMJudgeClient(base_url="https://judge.example.com", model="judge-model")
+    with pytest.raises(LLMJudgeUnavailable) as exc_info:
+        client.judge({"trace_id": "trace_illegal_decision"})
+    assert exc_info.value.error_type == "invalid_result"
+
+
+def test_verdict_rejects_mismatched_decision_action_as_invalid_result(monkeypatch):
+    _judge_response(monkeypatch, '{"decision":"work_related","recommended_action":"alert_non_work"}')
+    client = LLMJudgeClient(base_url="https://judge.example.com", model="judge-model")
+    with pytest.raises(LLMJudgeUnavailable) as exc_info:
+        client.judge({"trace_id": "trace_mismatch"})
+    assert exc_info.value.error_type == "invalid_result"
+
+
+def test_verdict_clamps_confidence_into_zero_one_range(monkeypatch):
+    _judge_response(monkeypatch, '{"decision":"work_related","recommended_action":"allow","confidence":5.0}')
+    client = LLMJudgeClient(base_url="https://judge.example.com", model="judge-model")
+    result = client.judge({"trace_id": "trace_clamp"})
+    assert result.decision == "work_related"
+    assert result.recommended_action == "allow"
+    assert result.confidence == 1.0

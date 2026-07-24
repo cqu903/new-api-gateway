@@ -2,7 +2,18 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from llm_judge import Verdict
 from models import ContextCatalogEntry, NormalizedMessage, TraceCapturedJob, WorkRelevanceAssessment
+from verdict_vocab import (
+    ACTION_ALERT_NON_WORK,
+    ACTION_ALLOW,
+    ACTION_RECORD_ONLY,
+    ACTION_REVIEW_CONFLICT,
+    DECISION_NEEDS_REVIEW,
+    DECISION_NON_WORK_RELATED,
+    DECISION_UNKNOWN,
+    DECISION_WORK_RELATED,
+)
 
 
 ANALYZER_VERSION = "work_relevance_mvp_2026_06_03"
@@ -10,35 +21,6 @@ ANALYZER_VERSION = "work_relevance_mvp_2026_06_03"
 LOW_TOKEN_LIMIT = 2_000
 HIGH_TOKEN_LIMIT = 20_000
 MAX_INTENT_CHARS = 4_000
-
-DECISION_WORK_RELATED = "work_related"
-DECISION_NON_WORK_RELATED = "non_work_related"
-DECISION_NEEDS_REVIEW = "needs_review"
-DECISION_UNKNOWN = "unknown"
-
-ACTION_ALLOW = "allow"
-ACTION_ALERT_NON_WORK = "alert_non_work"
-ACTION_REVIEW_CONFLICT = "review_conflict"
-ACTION_RECORD_ONLY = "record_only"
-
-VALID_DECISIONS = {
-    DECISION_WORK_RELATED,
-    DECISION_NON_WORK_RELATED,
-    DECISION_NEEDS_REVIEW,
-    DECISION_UNKNOWN,
-}
-VALID_ACTIONS = {
-    ACTION_ALLOW,
-    ACTION_ALERT_NON_WORK,
-    ACTION_REVIEW_CONFLICT,
-    ACTION_RECORD_ONLY,
-}
-VALID_DECISION_ACTIONS = {
-    DECISION_WORK_RELATED: {ACTION_ALLOW},
-    DECISION_NON_WORK_RELATED: {ACTION_ALERT_NON_WORK},
-    DECISION_NEEDS_REVIEW: {ACTION_REVIEW_CONFLICT},
-    DECISION_UNKNOWN: {ACTION_RECORD_ONLY},
-}
 
 TASK_KEYWORDS = {
     "debugging": ["debug", "bug", "error", "failure", "stack trace", "regression", "fix"],
@@ -91,12 +73,6 @@ class CatalogMatch:
     context: ContextCatalogEntry
     matched_terms: list[str]
     strength: str
-
-
-class InvalidLLMResult(Exception):
-    def __init__(self, error_type: str) -> None:
-        super().__init__(error_type)
-        self.error_type = error_type
 
 
 def classify_work_relevance(
@@ -558,46 +534,27 @@ def _llm_invocation_reason(
     return None
 
 
-def _clamp_float(value: Any, lower: float, upper: float) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        numeric = lower
-    return max(lower, min(upper, numeric))
-
-
-def _adapt_llm_result(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise InvalidLLMResult("invalid_result")
-
-    decision = raw.get("decision")
-    action = raw.get("recommended_action")
-    if decision not in VALID_DECISIONS or action not in VALID_ACTIONS:
-        raise InvalidLLMResult("invalid_result")
-    if action not in VALID_DECISION_ACTIONS.get(decision, set()):
-        raise InvalidLLMResult("invalid_result")
-
-    confidence = _clamp_float(raw.get("confidence", 0.7), 0.0, 1.0)
+def _adapt_llm_result(verdict: Verdict) -> dict[str, Any]:
+    # 校验（decision/action 合法性 + 配对 + confidence clamp）已由判定器在构造 Verdict 时完成；
+    # 这里只做 decision → work/personal score 的评分映射。见 ADR-0002。
     work_score = 0.0
     personal_score = 0.0
-    if decision == DECISION_WORK_RELATED:
-        work_score = max(0.7, confidence)
-    elif decision == DECISION_NON_WORK_RELATED:
-        personal_score = max(0.7, confidence)
-    elif decision == DECISION_NEEDS_REVIEW:
+    if verdict.decision == DECISION_WORK_RELATED:
+        work_score = max(0.7, verdict.confidence)
+    elif verdict.decision == DECISION_NON_WORK_RELATED:
+        personal_score = max(0.7, verdict.confidence)
+    elif verdict.decision == DECISION_NEEDS_REVIEW:
         work_score = 0.5
         personal_score = 0.5
 
     return {
-        "task_category": str(raw.get("task_category") or "unknown"),
-        "task_domain": str(raw.get("task_domain") or ""),
-        "reason": str(raw.get("reason") or ""),
-        "decision": decision,
-        "recommended_action": action,
-        "needs_review": action in {
-            ACTION_REVIEW_CONFLICT,
-        },
-        "confidence": confidence,
+        "task_category": verdict.task_category,
+        "task_domain": verdict.task_domain,
+        "reason": verdict.reason,
+        "decision": verdict.decision,
+        "recommended_action": verdict.recommended_action,
+        "needs_review": verdict.recommended_action == ACTION_REVIEW_CONFLICT,
+        "confidence": verdict.confidence,
         "work_related_score": work_score,
         "personal_use_score": personal_score,
         "score_breakdown": {
@@ -605,7 +562,7 @@ def _adapt_llm_result(raw: Any) -> dict[str, Any]:
             "non_work": round(personal_score, 3),
             "risk": 0.0,
             "conflict": round(min(work_score, personal_score), 3),
-            "uncertainty": round(max(0.0, 1.0 - confidence), 3),
+            "uncertainty": round(max(0.0, 1.0 - verdict.confidence), 3),
         },
     }
 

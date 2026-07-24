@@ -1,6 +1,6 @@
 import work_relevance
 
-from llm_judge import LLMJudgeUnavailable
+from llm_judge import LLMJudgeUnavailable, _build_verdict
 from models import ContextCatalogEntry, NormalizedMessage, TraceCapturedJob
 from work_relevance import ANALYZER_VERSION, classify_work_relevance, extract_user_intent, _truncate_message, _strip_content_noise, _filter_intent_messages
 
@@ -105,7 +105,8 @@ class StubJudge:
         self.calls.append(bundle)
         if self.error is not None:
             raise self.error
-        return self.result
+        # 模拟真判定器：raw result 经校验构造 Verdict；非法 / 配对不符抛 LLMJudgeUnavailable("invalid_result")。
+        return _build_verdict(self.result)
 
 
 def test_classifies_context_matched_coding_as_work_related():
@@ -704,14 +705,14 @@ def test_extract_user_intent_truncates_long_single_message():
 def test_adapt_llm_result_carries_task_domain_and_reason():
     from work_relevance import _adapt_llm_result
 
-    adapted = _adapt_llm_result({
+    adapted = _adapt_llm_result(_build_verdict({
         "decision": "non_work_related",
         "recommended_action": "alert_non_work",
         "task_category": "web_development",
         "task_domain": "manufacturing",
         "confidence": 0.9,
         "reason": "Task serves an unrelated industry.",
-    })
+    }))
     assert adapted["decision"] == "non_work_related"
     assert adapted["recommended_action"] == "alert_non_work"
     assert adapted["task_domain"] == "manufacturing"
@@ -721,11 +722,11 @@ def test_adapt_llm_result_carries_task_domain_and_reason():
 def test_adapt_llm_result_defaults_task_domain_and_reason_to_empty():
     from work_relevance import _adapt_llm_result
 
-    adapted = _adapt_llm_result({
+    adapted = _adapt_llm_result(_build_verdict({
         "decision": "work_related",
         "recommended_action": "allow",
         "confidence": 0.8,
-    })
+    }))
     assert adapted["task_domain"] == ""
     assert adapted["reason"] == ""
 
