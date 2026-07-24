@@ -73,3 +73,17 @@ docker compose -f deploy/docker-compose.yml --profile e2e --env-file .env.local 
 ## Docs To Sync
 
 - 如果你改了架构、命令、队列语义、运行方式或测试流程，至少检查 `README.md`、`ARCHITECTURE.md`、`CLAUDE.md`、`AGENTS.md` 是否一起过时。
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues (uses the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical labels, each label string equal to its role name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
