@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/your-company/new-api-gateway/internal/jobs"
 )
 
 type RuntimeProvider interface {
@@ -228,10 +230,10 @@ GROUP BY lease_owner
 
 func normalizeRuntimeStage(stage string) (normalized string, streamName string, groupName string, err error) {
 	switch strings.ToLower(strings.TrimSpace(stage)) {
-	case "", "core":
-		return "core", "analysis.core", "analysis-core-workers", nil
-	case "enrichment":
-		return "enrichment", "analysis.enrichment", "analysis-enrichment-workers", nil
+	case "", jobs.StageCore:
+		return jobs.StageCore, jobs.DefaultRedisCoreStream, jobs.GroupCore, nil
+	case jobs.StageEnrichment:
+		return jobs.StageEnrichment, jobs.DefaultRedisEnrichmentStream, jobs.GroupEnrichment, nil
 	default:
 		return "", "", "", fmt.Errorf("invalid analysis stage %q", stage)
 	}

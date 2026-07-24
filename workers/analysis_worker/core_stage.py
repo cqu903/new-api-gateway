@@ -1,3 +1,4 @@
+from contract import STREAM_ENRICHMENT
 from context_repository import PostgresContextRepository
 from models import AnalysisStage
 from repository import CoreStageAnalysisRepository
@@ -16,7 +17,7 @@ class CoreStageProcessor:
         evidence_store,
         storage_backend: str = "filesystem",
         llm_judge=None,
-        enrichment_stream_name: str = "analysis.enrichment",
+        enrichment_stream_name: str = STREAM_ENRICHMENT,
         redis_client=None,
         process_job_line_fn=None,
     ):

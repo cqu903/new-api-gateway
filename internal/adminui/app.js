@@ -33,7 +33,6 @@ const state = {
   },
   traces: {
     page: 1,
-    pageSize: 50,
     username: "",
     traceId: "",
     tokenFingerprint: "",
@@ -41,7 +40,6 @@ const state = {
   },
   anomalies: {
     page: 1,
-    pageSize: 50,
     anomalyType: "",
   },
   analysisRuntime: {
@@ -757,7 +755,7 @@ function bindAnomalyPagination() {
   if (!jumpInput || !jumpGo) return;
   const go = async () => {
     const totalPages = Number(jumpInput.max) || 0;
-    const next = parseAnomalyJumpPage(jumpInput.value, totalPages);
+    const next = window.Pagination.parseJumpPage(jumpInput.value, totalPages);
     if (next === null) {
       jumpInput.classList.add("invalid");
       return;
@@ -1253,56 +1251,13 @@ function renderEmployeeUsageChart(points) {
   });
 }
 
-function normalizeTracePagination(pagination) {
-  const normalized = pagination || {};
-  const fallbackPage = Math.max(1, finiteNumber(state.traces.page) || 1);
-  const fallbackPageSize = Math.max(1, finiteNumber(state.traces.pageSize) || 50);
-  return {
-    page: Math.max(1, finiteNumber(normalized.page) || fallbackPage),
-    pageSize: Math.max(1, finiteNumber(normalized.page_size) || fallbackPageSize),
-    totalItems: Math.max(0, finiteNumber(normalized.total_items)),
-    totalPages: Math.max(0, finiteNumber(normalized.total_pages)),
-    hasPrev: Boolean(normalized.has_prev),
-    hasNext: Boolean(normalized.has_next),
-  };
-}
-
-function tracePageNumbers(pagination) {
-  const total = pagination.totalPages;
-  const current = pagination.page;
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, index) => index + 1);
-  }
-  const pages = new Set([1, total, current - 1, current, current + 1]);
-  if (current <= 3) {
-    pages.add(2);
-    pages.add(3);
-    pages.add(4);
-  }
-  if (current >= total - 2) {
-    pages.add(total - 1);
-    pages.add(total - 2);
-    pages.add(total - 3);
-  }
-  return Array.from(pages)
-    .filter((page) => page >= 1 && page <= total)
-    .sort((a, b) => a - b);
-}
-
-// parseTraceJumpPage 把跳页输入解析为 [1, totalPages] 内的整数；非法/越界返回 null。
-function parseTraceJumpPage(raw, totalPages) {
-  const trimmed = String(raw ?? "").trim();
-  if (trimmed === "") return null;
-  const n = Number(trimmed);
-  if (!Number.isInteger(n) || n < 1 || n > totalPages) return null;
-  return n;
-}
+// 分页纯函数（normalize / pageNumbers / parseJumpPage）已抽到 pagination.js，通过全局 Pagination 调用。
 
 function tracePaginationHTML(pagination) {
   if (pagination.totalItems === 0 || pagination.totalPages === 0) {
     return `<div class="pagination-bar"><div class="pagination-summary">共 0 条</div></div>`;
   }
-  const pages = tracePageNumbers(pagination);
+  const pages = window.Pagination.pageNumbers(pagination);
   const pageButtons = [];
   let previous = 0;
   pages.forEach((pageNumber) => {
@@ -1348,7 +1303,7 @@ function bindTracePagination() {
   if (!jumpInput || !jumpGo) return;
   const go = async () => {
     const totalPages = Number(jumpInput.max) || 0;
-    const next = parseTraceJumpPage(jumpInput.value, totalPages);
+    const next = window.Pagination.parseJumpPage(jumpInput.value, totalPages);
     if (next === null) {
       jumpInput.classList.add("invalid");
       return;
@@ -1432,56 +1387,13 @@ const ANOMALY_TYPE_FILTERS = [
   { value: "multivariate_anomaly", label: "多变量异常" },
 ];
 
-function normalizeAnomalyPagination(pagination) {
-  const normalized = pagination || {};
-  const fallbackPage = Math.max(1, finiteNumber(state.anomalies.page) || 1);
-  const fallbackPageSize = Math.max(1, finiteNumber(state.anomalies.pageSize) || 50);
-  return {
-    page: Math.max(1, finiteNumber(normalized.page) || fallbackPage),
-    pageSize: Math.max(1, finiteNumber(normalized.page_size) || fallbackPageSize),
-    totalItems: Math.max(0, finiteNumber(normalized.total_items)),
-    totalPages: Math.max(0, finiteNumber(normalized.total_pages)),
-    hasPrev: Boolean(normalized.has_prev),
-    hasNext: Boolean(normalized.has_next),
-  };
-}
-
-function anomalyPageNumbers(pagination) {
-  const total = pagination.totalPages;
-  const current = pagination.page;
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, index) => index + 1);
-  }
-  const pages = new Set([1, total, current - 1, current, current + 1]);
-  if (current <= 3) {
-    pages.add(2);
-    pages.add(3);
-    pages.add(4);
-  }
-  if (current >= total - 2) {
-    pages.add(total - 1);
-    pages.add(total - 2);
-    pages.add(total - 3);
-  }
-  return Array.from(pages)
-    .filter((page) => page >= 1 && page <= total)
-    .sort((a, b) => a - b);
-}
-
-// parseAnomalyJumpPage 把跳页输入解析为 [1, totalPages] 内的整数；非法/越界返回 null。
-function parseAnomalyJumpPage(raw, totalPages) {
-  const trimmed = String(raw ?? "").trim();
-  if (trimmed === "") return null;
-  const n = Number(trimmed);
-  if (!Number.isInteger(n) || n < 1 || n > totalPages) return null;
-  return n;
-}
+// 分页纯函数（normalize / pageNumbers / parseJumpPage）已抽到 pagination.js，通过全局 Pagination 调用。
 
 function anomalyPaginationHTML(pagination) {
   if (pagination.totalItems === 0 || pagination.totalPages === 0) {
     return `<div class="pagination-bar"><div class="pagination-summary">共 0 条</div></div>`;
   }
-  const pages = anomalyPageNumbers(pagination);
+  const pages = window.Pagination.pageNumbers(pagination);
   const pageButtons = [];
   let previous = 0;
   pages.forEach((pageNumber) => {
@@ -1537,7 +1449,7 @@ function applyAnomalyFilter() {
 
 function renderTraces(body) {
   body = body || {};
-  const pagination = normalizeTracePagination(body.pagination);
+  const pagination = window.Pagination.normalize(body.pagination, { page: state.traces.page, pageSize: state.traces.pageSize });
   state.traces.page = pagination.page;
   state.traces.pageSize = pagination.pageSize;
   const rows = arrayValue(body.traces).map((trace) => [
@@ -1659,7 +1571,7 @@ function renderTraceDetail(body, returnView = "traces") {
 
 function renderAnomalies(body) {
   body = body || {};
-  const pagination = normalizeAnomalyPagination(body.pagination);
+  const pagination = window.Pagination.normalize(body.pagination, { page: state.anomalies.page, pageSize: state.anomalies.pageSize });
   state.anomalies.page = pagination.page;
   state.anomalies.pageSize = pagination.pageSize;
   const rows = arrayValue(body.anomalies).map((item) => {

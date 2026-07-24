@@ -39,7 +39,7 @@ function loadAppModule(overrides = {}) {
         return [];
       },
     },
-    window: { innerHeight: 900, innerWidth: 1440, UsagePage: { renderUsagePage: () => "" }, AdminAnalysisResultCards: { renderAnalysisResultCards: () => "" }, Chart: overrides.Chart || function Chart() {} },
+    window: { innerHeight: 900, innerWidth: 1440, UsagePage: { renderUsagePage: () => "" }, AdminAnalysisResultCards: { renderAnalysisResultCards: () => "" }, Chart: overrides.Chart || function Chart() {}, Pagination: require("./pagination.js") },
     fetch: overrides.fetch || (async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" })),
     module: { exports: {} },
     exports: {},
@@ -53,7 +53,6 @@ module.exports = {
   renderAnomalies: typeof renderAnomalies !== "undefined" ? renderAnomalies : undefined,
   renderTraceDetail: typeof renderTraceDetail !== "undefined" ? renderTraceDetail : undefined,
   applyTraceSearch: typeof applyTraceSearch !== "undefined" ? applyTraceSearch : undefined,
-  parseTraceJumpPage: typeof parseTraceJumpPage !== "undefined" ? parseTraceJumpPage : undefined,
 };`,
     sandbox,
   );
@@ -120,20 +119,7 @@ test("applyTraceSearch reads filter inputs into state and resets page to 1", () 
   assert.equal(app.state.traces.page, 1);
 });
 
-test("parseTraceJumpPage validates page input against total pages", () => {
-  const { app } = loadAppModule();
-  const total = 5;
-  assert.equal(app.parseTraceJumpPage("3", total), 3);
-  assert.equal(app.parseTraceJumpPage(" 2 ", total), 2);
-  assert.equal(app.parseTraceJumpPage("1", total), 1);
-  assert.equal(app.parseTraceJumpPage("5", total), 5);
-  assert.equal(app.parseTraceJumpPage("", total), null);
-  assert.equal(app.parseTraceJumpPage("abc", total), null);
-  assert.equal(app.parseTraceJumpPage("0", total), null);
-  assert.equal(app.parseTraceJumpPage("6", total), null);
-  assert.equal(app.parseTraceJumpPage("-1", total), null);
-  assert.equal(app.parseTraceJumpPage("2.5", total), null);
-});
+// parseTraceJumpPage 的测试已迁至 pagination.test.js（直接测 Pagination.parseJumpPage）。
 
 test("renderTraces emits a jump-to-page input bounded by total pages", () => {
   const { app, fakeApp } = loadAppModule();
